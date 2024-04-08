@@ -15,4 +15,4 @@ done
 echo "Last time: $(display_time)"
 # flush
 
-exit 1
+# exit 1

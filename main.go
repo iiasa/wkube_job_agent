@@ -31,6 +31,12 @@ type SignedURLResponse struct {
 }
 
 func main() {
+
+    if err := updateJobStatus("PROCESSING"); err != nil {
+        fmt.Println("Error updating status to PROCESSING:", err)
+        return
+    }
+
     if len(os.Args) < 2 {
         fmt.Println("Usage: go run main.go <command>")
         os.Exit(1)
@@ -83,7 +89,16 @@ func main() {
 
     // Wait for the command to finish
     if err := cmd.Wait(); err != nil {
+        if err := updateJobStatus("ERROR"); err != nil {
+            fmt.Println("Error updating status to ERROR:", err)
+            return
+        }
         fmt.Println("Error waiting for command:", err)
+    }
+
+    if err := updateJobStatus("DONE"); err != nil {
+        fmt.Println("Error updating status to DONE:", err)
+        return
     }
 }
 
@@ -98,7 +113,7 @@ func sendChunks(scanner *bufio.Scanner) {
         lines = append(lines, chunk...)
         lines = append(lines, '\n')
         lineCount++
-        fmt.Println("Scanned line:", string(chunk))
+        // fmt.Println("Scanned line:", string(chunk))
         // If reached chunk size, send the batch
         if lineCount == chunkSize {
             sendBatch(lines)
@@ -110,6 +125,80 @@ func sendChunks(scanner *bufio.Scanner) {
     if len(lines) > 0 {
         sendBatch(lines)
     }
+}
+
+type StatusEventDataType struct {
+    NewStatus  string      `json:"new_status"`
+}
+
+// NestedData represents the nested data structure
+type UpdateStatusEventPostData struct {
+    Type             string              `json:"type"`
+    StatusEventData  StatusEventDataType `json:"data"`
+}
+
+
+func updateJobStatus(newStatus string) error {
+
+    gatewayServer := getenvWithDefault(
+        "GATEWAY_SERVER",
+        "https://accelerator-api.iiasa.ac.at/",
+    )
+
+    authToken := os.Getenv("JOB_TOKEN")
+    if authToken == "" {
+        fmt.Println("AUTH_TOKEN environment variable not set")
+        os.Exit(1)
+    }
+
+    statusEventData := StatusEventDataType{
+        NewStatus: newStatus,
+    }
+
+    eventData := UpdateStatusEventPostData{
+        Type: "STATUS_UPDATE",
+        StatusEventData: statusEventData,
+    }
+
+    // Marshal the struct into JSON bytes
+    jsonEventData, err := json.Marshal(eventData)
+    if err != nil {
+        return fmt.Errorf("error marshaling event data json request: %v", err)
+    }
+
+    // Define the URL for the HTTP POST request
+    url := fmt.Sprintf("%sv1/ajob-cli/webhook-event/", gatewayServer)
+
+
+    statusUpdateReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonEventData))
+    if err != nil {
+        return fmt.Errorf("error creating status update HTTP request: %v", err)
+    }
+
+    statusUpdateReq.Header.Set("Content-Type", "application/json")
+
+    // Add custom header
+    statusUpdateReq.Header.Set("X-Authorization", authToken)
+
+    // Create an HTTP client
+    client := &http.Client{}
+
+
+    // Send HTTP POST request with nested JSON payload
+    resp, err := client.Do(statusUpdateReq)
+    if err != nil {
+        return fmt.Errorf("error sending status update HTTP request: %v", err)
+    }
+    defer resp.Body.Close()
+
+    // Check the response status code
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("unexpected status update response status code: %d", resp.StatusCode)
+    }
+
+    // Optionally, you can process the response body here
+
+    return nil
 }
 
 func sendBatch(lines []byte) {
@@ -171,7 +260,7 @@ func sendBatch(lines []byte) {
     }
 
     // Now, PUT the chunk to the signed URL
-    fmt.Println("Sending batch, size:", len(lines))
+    // fmt.Println("Sending batch, size:", len(lines))
     putReq, err := http.NewRequest("PUT", signedURLResponse.UploadURL, bytes.NewReader(lines))
     if err != nil {
         fmt.Println("Error creating PUT request for chunk:", err)
