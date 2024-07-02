@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 func getenvWithDefault(key, fallback string) string {
@@ -19,14 +20,32 @@ func getenvWithDefault(key, fallback string) string {
 	return fallback
 }
 
-// Constants to define chunk size
-const chunkSize = 8
-
 // SignedURLResponse represents the JSON response for obtaining a signed URL
 type SignedURLResponse struct {
 	UploadURL   string `json:"upload_url"`
 	Filename    string `json:"filename"`
 	AppBucketId int    `json:"app_bucket_id"`
+}
+
+var (
+	httpClient *http.Client
+)
+
+func init() {
+	// Create a transport with connection pooling
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		MaxIdleConns:        10,
+		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+
+	// Create a client with the transport
+	httpClient = &http.Client{
+		Transport: transport,
+	}
 }
 
 func main() {
@@ -102,34 +121,38 @@ func main() {
 }
 
 func sendChunks(scanner *bufio.Scanner) {
-	lines := make([]byte, 0)
-	lineCount := 0
-	logCounter := 0
+	var lines []byte
+	var logCounter int
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 
-	var logFilename string
-
-	// Iterate through lines and send each batch as a chunk in the HTTP request
-	for scanner.Scan() {
-		chunk := scanner.Bytes()
-
-		lines = append(lines, chunk...)
-		lines = append(lines, '\n')
-		lineCount++
-		// fmt.Println("Scanned line:", string(chunk))
-		// If reached chunk size, send the batch
-		if lineCount == chunkSize {
-			logFilename = fmt.Sprintf("wkube%d", logCounter)
-			logCounter++
-			sendBatch(lines, logFilename)
-			lines = lines[:0]
-			lineCount = 0
+	for {
+		select {
+		case <-ticker.C:
+			if len(lines) > 0 {
+				logFilename := fmt.Sprintf("wkube%d", logCounter)
+				logCounter++
+				sendBatch(lines, logFilename)
+				lines = lines[:0]
+			}
+		default:
+			if scanner.Scan() {
+				chunk := scanner.Bytes()
+				lines = append(lines, chunk...)
+				lines = append(lines, '\n')
+			} else {
+				if err := scanner.Err(); err != nil {
+					fmt.Println("Scanner error:", err)
+				}
+				// Send any remaining lines when the scanner is done
+				if len(lines) > 0 {
+					logFilename := fmt.Sprintf("wkube%d", logCounter)
+					logCounter++
+					sendBatch(lines, logFilename)
+				}
+				return
+			}
 		}
-	}
-	// If there are remaining lines, send the last batch
-	if len(lines) > 0 {
-		logFilename = fmt.Sprintf("wkube%d", logCounter)
-		logCounter++
-		sendBatch(lines, logFilename)
 	}
 }
 
@@ -146,11 +169,11 @@ type UpdateStatusEventPostData struct {
 func updateJobStatus(newStatus string) error {
 
 	gatewayServer := getenvWithDefault(
-		"GATEWAY_SERVER",
+		"ACC_JOB_GATEWAY_SERVER",
 		"https://accelerator-api.iiasa.ac.at/",
 	)
 
-	authToken := os.Getenv("JOB_TOKEN")
+	authToken := os.Getenv("ACC_JOB_TOKEN")
 	if authToken == "" {
 		fmt.Println("AUTH_TOKEN environment variable not set")
 		os.Exit(1)
@@ -184,11 +207,8 @@ func updateJobStatus(newStatus string) error {
 	// Add custom header
 	statusUpdateReq.Header.Set("X-Authorization", authToken)
 
-	// Create an HTTP client
-	client := &http.Client{}
-
 	// Send HTTP POST request with nested JSON payload
-	resp, err := client.Do(statusUpdateReq)
+	resp, err := httpClient.Do(statusUpdateReq)
 	if err != nil {
 		return fmt.Errorf("error sending status update HTTP request: %v", err)
 	}
@@ -207,11 +227,11 @@ func updateJobStatus(newStatus string) error {
 func sendBatch(lines []byte, logFilename string) {
 
 	gatewayServer := getenvWithDefault(
-		"GATEWAY_SERVER",
+		"ACC_JOB_GATEWAY_SERVER",
 		"https://accelerator-api.iiasa.ac.at/",
 	)
 
-	authToken := os.Getenv("JOB_TOKEN")
+	authToken := os.Getenv("ACC_JOB_TOKEN")
 	if authToken == "" {
 		fmt.Println("AUTH_TOKEN environment variable not set")
 		os.Exit(1)
@@ -228,19 +248,8 @@ func sendBatch(lines []byte, logFilename string) {
 	// Set authorization token in request header
 	req.Header.Set("X-Authorization", authToken)
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	// Create a client to perform the request
-	client := &http.Client{
-		Transport: transport,
-	}
-
 	// First, make a GET request to obtain a signed URL
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		fmt.Println("Error getting signed URL:", err)
 		return
@@ -265,7 +274,7 @@ func sendBatch(lines []byte, logFilename string) {
 		fmt.Println("Error creating PUT request for chunk:", err)
 		return
 	}
-	putResp, err := client.Do(putReq)
+	putResp, err := httpClient.Do(putReq)
 	if err != nil {
 		fmt.Println("Error sending batch over HTTP:", err)
 		return
@@ -292,7 +301,7 @@ func sendBatch(lines []byte, logFilename string) {
 	}
 	postReq.Header.Set("X-Authorization", authToken)
 	postReq.Header.Set("Content-Type", "application/json")
-	postResp, err := client.Do(postReq)
+	postResp, err := httpClient.Do(postReq)
 	if err != nil {
 		fmt.Println("Error sending POST request to register chunk:", err)
 		return
