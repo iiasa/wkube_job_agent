@@ -25,6 +25,7 @@ type SignedURLResponse struct {
 	UploadURL   string `json:"upload_url"`
 	Filename    string `json:"filename"`
 	AppBucketId int    `json:"app_bucket_id"`
+	IsHealthy   bool   `json:"is_healthy"`
 }
 
 var (
@@ -238,7 +239,7 @@ func sendBatch(lines []byte, logFilename string) {
 	}
 
 	// Connect to the remote server to get signed URL
-	remoteServer := fmt.Sprintf("%sv1/ajob-cli/presigned-upload-url/?filename=%s.log", gatewayServer, logFilename)
+	remoteServer := fmt.Sprintf("%sv1/ajob-cli/presigned-log-upload-url/?filename=%s.log", gatewayServer, logFilename)
 	req, err := http.NewRequest("GET", remoteServer, nil)
 	if err != nil {
 		fmt.Println("Error creating HTTP request:", err)
@@ -312,4 +313,9 @@ func sendBatch(lines []byte, logFilename string) {
 		fmt.Println("Error: unexpected response code while registering chunk:", postResp.StatusCode)
 		return
 	}
+
+	if !signedURLResponse.IsHealthy {
+        fmt.Println("Process is not healthy. Exiting...")
+        os.Exit(1) // Exit the program with a non-zero status code
+    } 
 }
