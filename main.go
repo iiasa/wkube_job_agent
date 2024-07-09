@@ -53,7 +53,7 @@ func main() {
 
 	if err := updateJobStatus("PROCESSING"); err != nil {
 		fmt.Println("Error updating status to PROCESSING:", err)
-		return
+		os.Exit(1)
 	}
 
 	if len(os.Args) < 2 {
@@ -110,14 +110,15 @@ func main() {
 	if err := cmd.Wait(); err != nil {
 		if err := updateJobStatus("ERROR"); err != nil {
 			fmt.Println("Error updating status to ERROR:", err)
-			return
+			os.Exit(1)
 		}
 		fmt.Println("Error waiting for command:", err)
+		os.Exit(1)
 	}
 
 	if err := updateJobStatus("DONE"); err != nil {
 		fmt.Println("Error updating status to DONE:", err)
-		return
+		os.Exit(1)
 	}
 }
 
@@ -133,7 +134,10 @@ func sendChunks(scanner *bufio.Scanner) {
 			if len(lines) > 0 {
 				logFilename := fmt.Sprintf("wkube%d", logCounter)
 				logCounter++
-				sendBatch(lines, logFilename)
+				if err := sendBatch(lines, logFilename); err != nil {
+					fmt.Println("Error sending batch:", err)
+					os.Exit(1)
+				}
 				lines = lines[:0]
 			}
 		default:
@@ -149,7 +153,10 @@ func sendChunks(scanner *bufio.Scanner) {
 				if len(lines) > 0 {
 					logFilename := fmt.Sprintf("wkube%d", logCounter)
 					logCounter++
-					sendBatch(lines, logFilename)
+					if err := sendBatch(lines, logFilename); err != nil {
+						fmt.Println("Error sending batch:", err)
+						os.Exit(1)
+					}
 				}
 				return
 			}
@@ -211,13 +218,15 @@ func updateJobStatus(newStatus string) error {
 	// Send HTTP POST request with nested JSON payload
 	resp, err := httpClient.Do(statusUpdateReq)
 	if err != nil {
-		return fmt.Errorf("error sending status update HTTP request: %v", err)
+		fmt.Println("Error sending status update HTTP request:", err)
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
 	// Check the response status code
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status update response status code: %d", resp.StatusCode)
+		fmt.Println("Unexpected status update response status code:", resp.StatusCode)
+		os.Exit(1)
 	}
 
 	// Optionally, you can process the response body here
@@ -225,7 +234,7 @@ func updateJobStatus(newStatus string) error {
 	return nil
 }
 
-func sendBatch(lines []byte, logFilename string) {
+func sendBatch(lines []byte, logFilename string) error {
 
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
@@ -242,8 +251,7 @@ func sendBatch(lines []byte, logFilename string) {
 	remoteServer := fmt.Sprintf("%sv1/ajob-cli/presigned-log-upload-url/?filename=%s.log", gatewayServer, logFilename)
 	req, err := http.NewRequest("GET", remoteServer, nil)
 	if err != nil {
-		fmt.Println("Error creating HTTP request:", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating HTTP request: %v", err)
 	}
 
 	// Set authorization token in request header
@@ -252,39 +260,32 @@ func sendBatch(lines []byte, logFilename string) {
 	// First, make a GET request to obtain a signed URL
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		fmt.Println("Error getting signed URL:", err)
-		return
+		return fmt.Errorf("error getting signed URL: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		fmt.Println("Error: unexpected response code while getting signed URL:", resp.StatusCode)
-		return
+		return fmt.Errorf("unexpected response code while getting signed URL: %d", resp.StatusCode)
 	}
 
 	var signedURLResponse SignedURLResponse
 	if err := json.NewDecoder(resp.Body).Decode(&signedURLResponse); err != nil {
-		fmt.Println("Error decoding signed URL response:", err)
-		return
+		return fmt.Errorf("error decoding signed URL response: %v", err)
 	}
 
 	// Now, PUT the chunk to the signed URL
-	// fmt.Println("Sending batch, size:", len(lines))
 	putReq, err := http.NewRequest("PUT", signedURLResponse.UploadURL, bytes.NewReader(lines))
 	if err != nil {
-		fmt.Println("Error creating PUT request for chunk:", err)
-		return
+		return fmt.Errorf("error creating PUT request for chunk: %v", err)
 	}
 	putResp, err := httpClient.Do(putReq)
 	if err != nil {
-		fmt.Println("Error sending batch over HTTP:", err)
-		return
+		return fmt.Errorf("error sending batch over HTTP: %v", err)
 	}
 	defer putResp.Body.Close()
 
 	if putResp.StatusCode != http.StatusOK {
-		fmt.Println("Error: unexpected response code while sending chunk:", putResp.StatusCode)
-		return
+		return fmt.Errorf("unexpected response code while sending chunk: %d", putResp.StatusCode)
 	}
 
 	// Finally, make a POST request to register the chunk with the bucket ID in the request body
@@ -292,30 +293,28 @@ func sendBatch(lines []byte, logFilename string) {
 	postData := map[string]interface{}{"filename": signedURLResponse.Filename, "app_bucket_id": signedURLResponse.AppBucketId}
 	postDataBytes, err := json.Marshal(postData)
 	if err != nil {
-		fmt.Println("Error encoding post data:", err)
-		return
+		return fmt.Errorf("error encoding post data: %v", err)
 	}
 	postReq, err := http.NewRequest("POST", postURL, bytes.NewReader(postDataBytes))
 	if err != nil {
-		fmt.Println("Error creating POST request to register chunk:", err)
-		return
+		return fmt.Errorf("error creating POST request to register chunk: %v", err)
 	}
 	postReq.Header.Set("X-Authorization", authToken)
 	postReq.Header.Set("Content-Type", "application/json")
 	postResp, err := httpClient.Do(postReq)
 	if err != nil {
-		fmt.Println("Error sending POST request to register chunk:", err)
-		return
+		return fmt.Errorf("error sending POST request to register chunk: %v", err)
 	}
 	defer postResp.Body.Close()
 
 	if postResp.StatusCode != http.StatusOK {
-		fmt.Println("Error: unexpected response code while registering chunk:", postResp.StatusCode)
-		return
+		return fmt.Errorf("unexpected response code while registering chunk: %d", postResp.StatusCode)
 	}
 
 	if !signedURLResponse.IsHealthy {
-        fmt.Println("Process is not healthy. Exiting...")
-        os.Exit(1) // Exit the program with a non-zero status code
-    } 
+		fmt.Println("Process is not healthy. Exiting...")
+		os.Exit(1) // Exit the program with a non-zero status code
+	}
+
+	return nil
 }
