@@ -333,7 +333,7 @@ func sendBatch(lines []byte, logFilename string) error {
 	return nil
 }
 
-func checkHealth(){
+func checkHealth() error {
 
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
