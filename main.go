@@ -28,6 +28,10 @@ type SignedURLResponse struct {
 	IsHealthy   bool   `json:"is_healthy"`
 }
 
+type HealthCheckResponse struct {
+	IsHealthy   bool   `json:"is_healthy"`
+}
+
 var (
 	httpClient *http.Client
 )
@@ -139,6 +143,11 @@ func sendChunks(scanner *bufio.Scanner) {
 					os.Exit(1)
 				}
 				lines = lines[:0]
+			} else {
+				if err := checkHealth(); err != nil {
+					fmt.Println("Error checking health", err)
+					os.Exit(1)
+				}
 			}
 		default:
 			if scanner.Scan() {
@@ -155,6 +164,11 @@ func sendChunks(scanner *bufio.Scanner) {
 					logCounter++
 					if err := sendBatch(lines, logFilename); err != nil {
 						fmt.Println("Error sending batch:", err)
+						os.Exit(1)
+					}
+				} else {
+					if err := checkHealth(); err != nil {
+						fmt.Println("Error checking health", err)
 						os.Exit(1)
 					}
 				}
@@ -317,4 +331,52 @@ func sendBatch(lines []byte, logFilename string) error {
 	}
 
 	return nil
+}
+
+func checkHealth(){
+
+	gatewayServer := getenvWithDefault(
+		"ACC_JOB_GATEWAY_SERVER",
+		"https://accelerator-api.iiasa.ac.at/",
+	)
+
+	authToken := os.Getenv("ACC_JOB_TOKEN")
+	if authToken == "" {
+		fmt.Println("AUTH_TOKEN environment variable not set")
+		os.Exit(1)
+	}
+
+	// Connect to the remote server to get signed URL
+	remoteServer := fmt.Sprintf("%sv1/ajob-cli/is-healthy/", gatewayServer)
+	req, err := http.NewRequest("GET", remoteServer, nil)
+	if err != nil {
+		return fmt.Errorf("error creating HTTP request: %v", err)
+	}
+
+	// Set authorization token in request header
+	req.Header.Set("X-Authorization", authToken)
+
+	// First, make a GET request to obtain a signed URL
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("error checking health: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected response code while checking health: %d", resp.StatusCode)
+	}
+
+	var healthCheckResponse HealthCheckResponse
+	if err := json.NewDecoder(resp.Body).Decode(&healthCheckResponse); err != nil {
+		return fmt.Errorf("error decoding signed URL response: %v", err)
+	}
+
+	if !healthCheckResponse.IsHealthy {
+		fmt.Println("Process is not healthy. Exiting...")
+		os.Exit(1) // Exit the program with a non-zero status code
+	}
+
+	return nil
+	
 }
