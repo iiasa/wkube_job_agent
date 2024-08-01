@@ -40,7 +40,7 @@ var (
 
 func init() {
 	// Initialize logCounter with the current Unix time
-	logCounter = time.Now().Unix()
+	logCounter = int(time.Now().Unix())
 
 	// Create a transport with connection pooling
 	transport := &http.Transport{
