@@ -34,9 +34,14 @@ type HealthCheckResponse struct {
 
 var (
 	httpClient *http.Client
+	logCounter int
+	counterMu  sync.Mutex // Mutex to protect access to logCounter
 )
 
 func init() {
+	// Initialize logCounter with the current Unix time
+	logCounter = time.Now().Unix()
+
 	// Create a transport with connection pooling
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
@@ -54,7 +59,6 @@ func init() {
 }
 
 func main() {
-
 	if err := updateJobStatus("PROCESSING"); err != nil {
 		fmt.Println("Error updating status to PROCESSING:", err)
 		os.Exit(1)
@@ -128,7 +132,6 @@ func main() {
 
 func sendChunks(scanner *bufio.Scanner) {
 	var lines []byte
-	logCounter := time.Now().Unix()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -136,8 +139,11 @@ func sendChunks(scanner *bufio.Scanner) {
 		select {
 		case <-ticker.C:
 			if len(lines) > 0 {
+				counterMu.Lock()
 				logFilename := fmt.Sprintf("wkube%d", logCounter)
 				logCounter++
+				counterMu.Unlock()
+
 				if err := sendBatch(lines, logFilename); err != nil {
 					fmt.Println("Error sending batch:", err)
 					os.Exit(1)
@@ -160,8 +166,11 @@ func sendChunks(scanner *bufio.Scanner) {
 				}
 				// Send any remaining lines when the scanner is done
 				if len(lines) > 0 {
+					counterMu.Lock()
 					logFilename := fmt.Sprintf("wkube%d", logCounter)
 					logCounter++
+					counterMu.Unlock()
+
 					if err := sendBatch(lines, logFilename); err != nil {
 						fmt.Println("Error sending batch:", err)
 						os.Exit(1)
@@ -189,7 +198,6 @@ type UpdateStatusEventPostData struct {
 }
 
 func updateJobStatus(newStatus string) error {
-
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
 		"https://accelerator-api.iiasa.ac.at/",
@@ -249,7 +257,6 @@ func updateJobStatus(newStatus string) error {
 }
 
 func sendBatch(lines []byte, logFilename string) error {
-
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
 		"https://accelerator-api.iiasa.ac.at/",
@@ -334,7 +341,6 @@ func sendBatch(lines []byte, logFilename string) error {
 }
 
 func checkHealth() error {
-
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
 		"https://accelerator-api.iiasa.ac.at/",
@@ -378,5 +384,4 @@ func checkHealth() error {
 	}
 
 	return nil
-	
 }
