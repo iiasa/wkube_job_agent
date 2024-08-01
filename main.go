@@ -128,7 +128,7 @@ func main() {
 
 func sendChunks(scanner *bufio.Scanner) {
 	var lines []byte
-	var logCounter int
+	logCounter := time.Now().Unix()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
