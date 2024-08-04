@@ -200,7 +200,7 @@ type UpdateStatusEventPostData struct {
 func updateJobStatus(newStatus string) error {
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
-		"https://accelerator-api.iiasa.ac.at/",
+		"https://accelerator-api.iiasa.ac.at",
 	)
 
 	authToken := os.Getenv("ACC_JOB_TOKEN")
@@ -225,7 +225,7 @@ func updateJobStatus(newStatus string) error {
 	}
 
 	// Define the URL for the HTTP POST request
-	url := fmt.Sprintf("%sv1/ajob-cli/webhook-event/", gatewayServer)
+	url := fmt.Sprintf("%s/v1/ajob-cli/webhook-event/", gatewayServer)
 
 	statusUpdateReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonEventData))
 	if err != nil {
@@ -259,7 +259,7 @@ func updateJobStatus(newStatus string) error {
 func sendBatch(lines []byte, logFilename string) error {
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
-		"https://accelerator-api.iiasa.ac.at/",
+		"https://accelerator-api.iiasa.ac.at",
 	)
 
 	authToken := os.Getenv("ACC_JOB_TOKEN")
@@ -269,7 +269,7 @@ func sendBatch(lines []byte, logFilename string) error {
 	}
 
 	// Connect to the remote server to get signed URL
-	remoteServer := fmt.Sprintf("%sv1/ajob-cli/presigned-log-upload-url/?filename=%s.log", gatewayServer, logFilename)
+	remoteServer := fmt.Sprintf("%s/v1/ajob-cli/presigned-log-upload-url/?filename=%s.log", gatewayServer, logFilename)
 	req, err := http.NewRequest("GET", remoteServer, nil)
 	if err != nil {
 		return fmt.Errorf("error creating HTTP request: %v", err)
@@ -310,7 +310,7 @@ func sendBatch(lines []byte, logFilename string) error {
 	}
 
 	// Finally, make a POST request to register the chunk with the bucket ID in the request body
-	postURL := fmt.Sprintf("%sv1/ajob-cli/register-log-file/", gatewayServer)
+	postURL := fmt.Sprintf("%s/v1/ajob-cli/register-log-file/", gatewayServer)
 	postData := map[string]interface{}{"filename": signedURLResponse.Filename, "app_bucket_id": signedURLResponse.AppBucketId}
 	postDataBytes, err := json.Marshal(postData)
 	if err != nil {
@@ -343,7 +343,7 @@ func sendBatch(lines []byte, logFilename string) error {
 func checkHealth() error {
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
-		"https://accelerator-api.iiasa.ac.at/",
+		"https://accelerator-api.iiasa.ac.at",
 	)
 
 	authToken := os.Getenv("ACC_JOB_TOKEN")
@@ -353,7 +353,7 @@ func checkHealth() error {
 	}
 
 	// Connect to the remote server to get signed URL
-	remoteServer := fmt.Sprintf("%sv1/ajob-cli/is-healthy/", gatewayServer)
+	remoteServer := fmt.Sprintf("%s/v1/ajob-cli/is-healthy/", gatewayServer)
 	req, err := http.NewRequest("GET", remoteServer, nil)
 	if err != nil {
 		return fmt.Errorf("error creating HTTP request: %v", err)
