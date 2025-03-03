@@ -8,5 +8,5 @@ if [ ! -f "$binary_file" ]; then
 fi
 
 chmod +x "$binary_file"
-echo "Executing binary..."
-./"$binary_file" "bash command"
+echo "Executing cleanup..."
+./"$binary_file" POST "python posttask.py"

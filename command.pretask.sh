@@ -3,6 +3,8 @@
 binary_url="https://testwithfastapi.s3.amazonaws.com/wagt-v0.5-linux-amd/wagt"
 binary_file="/mnt/agent/wagt"
 
+mkdir -p /mnt/agent
+
 download_with_curl() {
     if command -v curl &>/dev/null; then
         curl -sSL "$binary_url" -o "$binary_file"
@@ -29,3 +31,9 @@ else
     echo "Error: Neither curl nor wget is available."
     exit 1
 fi
+
+chmod +x "$binary_file"
+echo "Executing init task..."
+./"$binary_file" PRE "python pretask.py"
+
+
