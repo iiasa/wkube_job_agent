@@ -59,18 +59,43 @@ func init() {
 }
 
 func main() {
-	if err := updateJobStatus("PROCESSING"); err != nil {
-		fmt.Println("Error updating status to PROCESSING:", err)
+
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: go run main.go <mode> <command>")
 		os.Exit(1)
 	}
 
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go <command>")
-		os.Exit(1)
+	mode := os.Args[1]
+
+
+	if mode == "PRE" {
+
+		if err := updateJobStatus("MAPPING_INPUTS"); err != nil {
+			fmt.Println("Error updating status to MAPPING_INPUTS:", err)
+			os.Exit(1)
+		}
+
+	} else if mode == "MAIN" {
+
+		if err := updateJobStatus("PROCESSING"); err != nil {
+			fmt.Println("Error updating status to PROCESSING:", err)
+			os.Exit(1)
+		}
+
+	} else if mode == "POST" {
+
+		if err := updateJobStatus("MAPPING_OUTPUTS"); err != nil {
+			fmt.Println("Error updating status to MAPPING_OUTPUTS:", err)
+			os.Exit(1)
+		}
+
 	}
 
+
+	
+	
 	// Get the command-line argument
-	command := os.Args[1]
+	command := os.Args[2]
 
 	// Execute the command with /bin/sh
 	cmd := exec.Command("/bin/sh", "-c", command)
@@ -124,9 +149,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := updateJobStatus("DONE"); err != nil {
-		fmt.Println("Error updating status to DONE:", err)
-		os.Exit(1)
+
+	if mode == "POST"{
+
+		if err := updateJobStatus("DONE"); err != nil {
+			fmt.Println("Error updating status to DONE:", err)
+			os.Exit(1)
+		}
+
 	}
 }
 
