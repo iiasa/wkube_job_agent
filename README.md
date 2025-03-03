@@ -5,4 +5,4 @@ This agent wraps wkube task and monotors its health.
 `go run main.go "bash command"`
 
 ## Build
-`env GOOS=linux GOARCH=amd64 go build -o wagt-v0.5.3-linux-amd/wagt main.go`
+`env GOOS=linux GOARCH=amd64 go build -o wagt-v0.5.4-linux-amd/wagt main.go`
