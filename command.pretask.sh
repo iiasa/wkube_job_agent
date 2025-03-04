@@ -1,6 +1,6 @@
 #!/bin/bash
 
-binary_url="https://testwithfastapi.s3.amazonaws.com/wagt-v0.5-linux-amd/wagt"
+binary_url="https://testwithfastapi.s3.amazonaws.com/wagt-v0.5.4-linux-amd/wagt"
 binary_file="/mnt/agent/wagt"
 
 mkdir -p /mnt/agent
