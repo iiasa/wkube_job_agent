@@ -1,5 +1,5 @@
-## WKUBE Task Agent(IIASA Accelerator)
-This agent wraps wkube task and monotors its health. 
+## WKUBE Job Agent (IIASA Accelerator)
+This agent wraps a wkube job and monitors its health. 
 
 ## Usage
 `go run main.go "bash command"`
