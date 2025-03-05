@@ -58,8 +58,7 @@ func getMultipartPutCreateSignedURL(appBucketID, objectName, uploadID string, pa
 		return nil, err
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +82,7 @@ func getPutCreateMultipartUploadID(filename string) (string, string, string, err
 		return "", "", "", err
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -125,8 +123,7 @@ func completeJobMultipartUpload(appBucketID, filename, uploadID string, parts []
 		return nil, err
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -160,8 +157,7 @@ func abortCreateMultipartUpload(appBucketID, filename, uploadID string) (map[str
 		return nil, err
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +189,7 @@ func enumerateFilesByPrefix(prefix string) (map[string]interface{}, error) {
 	}
 
 	// Send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -288,8 +283,7 @@ func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile b
 		}
 		req.Header.Set("Content-Type", "application/octet-stream")
 
-		client := &http.Client{}
-		resp, err := client.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("error uploading part: %v", err)
 		}
@@ -359,8 +353,7 @@ func getFileURLFromRepo(filename string) (string, error) {
 	}
 
 	// Send the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("error sending request: %v", err)
 	}
