@@ -1,5 +1,6 @@
 ## WKUBE Job Agent (IIASA Accelerator)
-This agent wraps a wkube job and monitors its health. 
+
+This agent injects into a wkube job, performs data mapping on startup and finalization, and monitors its health. 
 
 ## Usage
 `go run main.go "bash command"`
