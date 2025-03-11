@@ -1,13 +1,8 @@
 package main
 
-
-package main
-
 import (
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,14 +18,15 @@ func remoteCopy(source, destination string) {
 
 	for _, file := range files {
 
-		if(string.HasSuffix("/")){
+		var destinationFile string
+
+		if strings.HasSuffix(destination, "/") {
 			// Construct the destination file path
-		    relPath := strings.TrimPrefix(file, source)
-		    destinationFile := filepath.Join(destination, relPath)
+			relPath := strings.TrimPrefix(file, source)
+			destinationFile = filepath.Join(destination, relPath)
 		} else {
-			destinationFile := destination
+			destinationFile = destination
 		}
-		
 
 		// Ensure the destination directory exists
 		if err := os.MkdirAll(filepath.Dir(destinationFile), os.ModePerm); err != nil {
@@ -89,24 +85,11 @@ func outputMappingFromMountedStorage(source, destination string) {
 	}
 }
 
-func inputMapping() {
+func processInputMappings(inputMappings []string) {
+
 	taskQueue := []func(){}
-	// Retrieve input and output mappings from environment variables
-	inputMappings := os.Getenv("input_mappings")
-	outputMappings := os.Getenv("output_mappings")
 
-	if inputMappings == "" || outputMappings == "" {
-		log.Fatal("Error: input_mappings or output_mappings environment variables not set") // Stop program on error
-	}
-
-	// Split mappings into individual tasks
-	allInputMappings := strings.Split(inputMappings, ";")
-	allOutputMappings := strings.Split(outputMappings, ";")
-
-	var wg sync.WaitGroup
-
-	// Process input mappings
-	for _, inputMapping := range allInputMappings {
+	for _, inputMapping := range inputMappings {
 		inputMapping = strings.TrimSpace(inputMapping)
 		if inputMapping == "" {
 			continue
@@ -125,14 +108,28 @@ func inputMapping() {
 			log.Fatal("Error: invalid source in input mappings") // Stop program on error
 		}
 
-		if (strings.HasPrefix(source, "selected_files")){
-			splittedSelectedFilesSource := strings.Split(source, "selected_files.")
+		if source == "selected_files" {
+			// first of all destination should not be empty
+			// if the destination ends with / then move all the files to that folder also check what happens in other cases
+			// if ends with not / and too many files selected -- raise error only one file should be selected
 
-			if len(splittedSelectedFilesSource) != 2 {
-
+			if destination == "" {
+				log.Fatal("Error: destination for selected_files mapping should be defined.")
 			}
-		}
 
+			selectedFilesFromEnv = os.Getenv("selected_filenames")
+
+			if selectedFilesFromEnv != "" {
+				selectedFiles := strings.Split(selectedFilesFromEnv, ",")
+
+				if strings.HasSuffix(destination, '/') {
+
+				} else {
+
+				}
+			}
+
+		}
 
 		if destination == "" {
 			if strings.HasPrefix(source, "__acc__") {
@@ -146,14 +143,18 @@ func inputMapping() {
 
 		if strings.HasPrefix(source, "__acc__") {
 			source = strings.TrimPrefix(source, "__acc__")
-			append(taskQueue, func(){remoteCopy(source, destination)})
+			append(taskQueue, func() { remoteCopy(source, destination) })
 		} else if strings.HasPrefix(source, "/mnt/data") {
-			append(taskQueue, func(){inputMappingFromMountedStorage(source, destination)})
+			append(taskQueue, func() { inputMappingFromMountedStorage(source, destination) })
 		}
 	}
+	return taskQueue
+}
 
+func processOutputMappings(outputMappings []string) {
+	taskQueue := []func(){}
 	// Process output mappings
-	for _, outputMapping := range allOutputMappings {
+	for _, outputMapping := range outputMappings {
 		outputMapping = strings.TrimSpace(outputMapping)
 		if outputMapping == "" {
 			continue
@@ -185,9 +186,32 @@ func inputMapping() {
 		}
 
 		if strings.HasPrefix(destination, "/mnt/data") {
-			append(taskQueue, func(){outputMappingFromMountedStorage(destination, source)})
+			append(taskQueue, func() { outputMappingFromMountedStorage(destination, source) })
 		}
 	}
+	return taskQueue
+}
+
+func processMappings() {
+
+	// Retrieve input and output mappings from environment variables
+	inputMappings := os.Getenv("input_mappings")
+	outputMappings := os.Getenv("output_mappings")
+
+	if inputMappings == "" || outputMappings == "" {
+		log.Fatal("Error: input_mappings or output_mappings environment variables not set") // Stop program on error
+	}
+
+	// Split mappings into individual tasks
+	allInputMappings := strings.Split(inputMappings, ";")
+	allOutputMappings := strings.Split(outputMappings, ";")
+
+	var wg sync.WaitGroup
+	// Process input mappings
+	inputMappingsTaskQueue := processInputMappings(allInputMappings)
+	outputMappingsTaskQueue := processOutputMappings(allOutputMappings)
+
+	taskQueue := append(inputMappingsTaskQueue, outputMappingsTaskQueue...)
 
 	// Wait for all tasks to complete
 	wg.Add(1)
@@ -196,7 +220,7 @@ func inputMapping() {
 		for _, task := range taskQueue {
 			task()
 		}
-	}
+	}()
 	wg.Wait()
 
 	fmt.Println("Input mappings completed completed")

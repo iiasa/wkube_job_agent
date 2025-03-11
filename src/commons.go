@@ -172,7 +172,7 @@ func abortCreateMultipartUpload(appBucketID, filename, uploadID string) (map[str
 }
 
 
-func enumerateFilesByPrefix(prefix string) (map[string]interface{}, error) {
+func enumerateFilesByPrefix(prefix string) ([]string, error) {
 	// Extract the project slug from the prefix (assuming the prefix starts with the project slug)
 	projectSlug := strings.Split(prefix, "/")[0]
 
@@ -196,7 +196,7 @@ func enumerateFilesByPrefix(prefix string) (map[string]interface{}, error) {
 	defer resp.Body.Close()
 
 	// Decode the response
-	var result map[string]interface{}
+	var result []string
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
