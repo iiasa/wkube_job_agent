@@ -16,6 +16,12 @@ func remoteCopy(source, destination string) {
 		log.Fatalf("Error enumerating files: %v\n", err) // Stop program on error
 	}
 
+	if len(files) > 1 && !strings.HasSuffix(destination, "/") {
+		log.Fatalf(
+			"Error: mapping: %s:%s -- destination should end with '/' when mapping is from remote folder with multiple files. ",
+			source, destination)
+	}
+
 	for _, file := range files {
 
 		var destinationFile string
@@ -23,6 +29,11 @@ func remoteCopy(source, destination string) {
 		if strings.HasSuffix(destination, "/") {
 			// Construct the destination file path
 			relPath := strings.TrimPrefix(file, source)
+
+			if strings.HasPrefix(relPath, "/") {
+				relPath = strings.TrimPrefix(relPath, "/")
+			}
+
 			destinationFile = filepath.Join(destination, relPath)
 		} else {
 			destinationFile = destination
@@ -85,7 +96,7 @@ func outputMappingFromMountedStorage(source, destination string) {
 	}
 }
 
-func processInputMappings(inputMappings []string) {
+func processInputMappings(inputMappings []string) []func() {
 
 	taskQueue := []func(){}
 
@@ -104,8 +115,33 @@ func processInputMappings(inputMappings []string) {
 		source := splittedInputMapping[0]
 		destination := splittedInputMapping[1]
 
-		if !strings.HasPrefix(source, "__acc__") && !strings.HasPrefix(source, "/mnt/data") && source != "selected_files" {
+		if !strings.HasPrefix(source, "__acc__") && !strings.HasPrefix(source, "/mnt/data") && source != "selected_files" && source != "selected_folders" {
 			log.Fatal("Error: invalid source in input mappings") // Stop program on error
+		}
+
+		if source == "selected_folders" {
+			if destination == "" {
+				log.Fatal("Error: destination for selected_folders mapping should be defined.")
+			}
+
+			selectedFoldersFromEnv := os.Getenv("selected_foldernames")
+
+			if selectedFoldersFromEnv != "" {
+				selectedFolders := strings.Split(selectedFoldersFromEnv, ",")
+
+				var newMappings []string
+
+				for _, selectedFolder := range selectedFolders {
+
+					if selectedFolder != "" {
+						newMapping := fmt.Sprintf("acc://%s:%s", selectedFolder, destination)
+						newMappings = append(newMappings, newMapping)
+					}
+				}
+
+				processInputMappings(newMappings)
+			}
+
 		}
 
 		if source == "selected_files" {
@@ -117,16 +153,38 @@ func processInputMappings(inputMappings []string) {
 				log.Fatal("Error: destination for selected_files mapping should be defined.")
 			}
 
-			selectedFilesFromEnv = os.Getenv("selected_filenames")
+			selectedFilesFromEnv := os.Getenv("selected_filenames")
 
 			if selectedFilesFromEnv != "" {
 				selectedFiles := strings.Split(selectedFilesFromEnv, ",")
 
-				if strings.HasSuffix(destination, '/') {
+				var newMappings []string
 
+				if strings.HasSuffix(destination, "/") {
+
+					for _, selectedFile := range selectedFiles {
+
+						if selectedFile != "" {
+							splittedPath := strings.Split(selectedFile, "/")
+							filename := splittedPath[len(splittedPath)-1]
+							newDestination := fmt.Sprintf("%s/%s", destination, &filename)
+							newMapping := fmt.Sprintf("acc://%s:%s", selectedFile, newDestination)
+							newMappings = append(newMappings, newMapping)
+						}
+					}
 				} else {
 
+					if len(selectedFiles) > 1 {
+						log.Fatal("Error: when destination is file (without '/'), there should only be one selected file.")
+					} else {
+						if selectedFiles[0] != "" {
+							newMapping := fmt.Sprintf("acc://%s:%s", selectedFiles[0], destination)
+							newMappings = append(newMappings, newMapping)
+						}
+					}
 				}
+
+				processInputMappings(newMappings)
 			}
 
 		}
@@ -143,15 +201,15 @@ func processInputMappings(inputMappings []string) {
 
 		if strings.HasPrefix(source, "__acc__") {
 			source = strings.TrimPrefix(source, "__acc__")
-			append(taskQueue, func() { remoteCopy(source, destination) })
+			taskQueue = append(taskQueue, func() { remoteCopy(source, destination) })
 		} else if strings.HasPrefix(source, "/mnt/data") {
-			append(taskQueue, func() { inputMappingFromMountedStorage(source, destination) })
+			taskQueue = append(taskQueue, func() { inputMappingFromMountedStorage(source, destination) })
 		}
 	}
 	return taskQueue
 }
 
-func processOutputMappings(outputMappings []string) {
+func processOutputMappings(outputMappings []string) []func() {
 	taskQueue := []func(){}
 	// Process output mappings
 	for _, outputMapping := range outputMappings {
@@ -186,7 +244,7 @@ func processOutputMappings(outputMappings []string) {
 		}
 
 		if strings.HasPrefix(destination, "/mnt/data") {
-			append(taskQueue, func() { outputMappingFromMountedStorage(destination, source) })
+			taskQueue = append(taskQueue, func() { outputMappingFromMountedStorage(destination, source) })
 		}
 	}
 	return taskQueue

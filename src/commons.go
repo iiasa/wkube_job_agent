@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"os",
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"strings"
 )
 
@@ -20,34 +20,34 @@ func getenvWithDefault(key, fallback string) string {
 }
 
 func createRequest(method, endpoint string, body []byte) (*http.Request, error) {
-    gatewayServer := getenvWithDefault(
-        "ACC_JOB_GATEWAY_SERVER",
-        "https://accelerator-api.iiasa.ac.at",
-    )
+	gatewayServer := getenvWithDefault(
+		"ACC_JOB_GATEWAY_SERVER",
+		"https://accelerator-api.iiasa.ac.at",
+	)
 
-    authToken := os.Getenv("ACC_JOB_TOKEN")
-    if authToken == "" {
-        return nil, fmt.Errorf("AUTH_TOKEN environment variable not set")
-    }
+	authToken := os.Getenv("ACC_JOB_TOKEN")
+	if authToken == "" {
+		return nil, fmt.Errorf("AUTH_TOKEN environment variable not set")
+	}
 
-    url := fmt.Sprintf("%s%s", gatewayServer, endpoint)
-    var req *http.Request
-    var err error
+	url := fmt.Sprintf("%s%s", gatewayServer, endpoint)
+	var req *http.Request
+	var err error
 
-    if body != nil {
-        req, err = http.NewRequest(method, url, bytes.NewBuffer(body))
-    } else {
-        req, err = http.NewRequest(method, url, nil)
-    }
+	if body != nil {
+		req, err = http.NewRequest(method, url, bytes.NewBuffer(body))
+	} else {
+		req, err = http.NewRequest(method, url, nil)
+	}
 
-    if err != nil {
-        return nil, fmt.Errorf("error creating HTTP request: %v", err)
-    }
+	if err != nil {
+		return nil, fmt.Errorf("error creating HTTP request: %v", err)
+	}
 
-    req.Header.Set("X-Authorization", authToken)
-    req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Authorization", authToken)
+	req.Header.Set("Content-Type", "application/json")
 
-    return req, nil
+	return req, nil
 }
 
 // getMultipartPutCreateSignedURL retrieves a signed URL for creating a multipart upload.
@@ -72,8 +72,6 @@ func getMultipartPutCreateSignedURL(appBucketID, objectName, uploadID string, pa
 	return result, nil
 }
 
-
-
 // getPutCreateMultipartUploadID retrieves a multipart upload ID for creating a new upload.
 func getPutCreateMultipartUploadID(filename string) (string, string, string, error) {
 	endpoint := fmt.Sprintf("/create-multipart-upload-id/%s", filename)
@@ -95,7 +93,6 @@ func getPutCreateMultipartUploadID(filename string) (string, string, string, err
 
 	return result["upload_id"], result["app_bucket_id"], result["uniqified_filename"], nil
 }
-
 
 // completeJobMultipartUpload completes a multipart upload for a job.
 func completeJobMultipartUpload(appBucketID, filename, uploadID string, parts [][]string, isLogFile bool) (map[string]interface{}, error) {
@@ -137,8 +134,6 @@ func completeJobMultipartUpload(appBucketID, filename, uploadID string, parts []
 	return result, nil
 }
 
-
-
 // abortCreateMultipartUpload aborts a multipart upload for creation.
 func abortCreateMultipartUpload(appBucketID, filename, uploadID string) (map[string]interface{}, error) {
 	payload := map[string]interface{}{
@@ -170,7 +165,6 @@ func abortCreateMultipartUpload(appBucketID, filename, uploadID string) (map[str
 
 	return result, nil
 }
-
 
 func enumerateFilesByPrefix(prefix string) ([]string, error) {
 	// Extract the project slug from the prefix (assuming the prefix starts with the project slug)
@@ -204,7 +198,6 @@ func enumerateFilesByPrefix(prefix string) ([]string, error) {
 	return result, nil
 }
 
-
 // readPartData reads part data of a given size from a stream.
 func readPartData(stream io.Reader, size int, partData []byte) ([]byte, error) {
 	size -= len(partData)
@@ -226,7 +219,6 @@ func readPartData(stream io.Reader, size int, partData []byte) ([]byte, error) {
 // addFilestreamAsJobOutput uploads a file stream as a job output using multipart upload.
 func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile bool) (map[string]interface{}, error) {
 	partSize := 50 * 1024 * 1024 // 50 MB
-	partCount := -1
 
 	var uploadID, appBucketID, uniqifiedFilename string
 	var oneByte []byte
@@ -252,7 +244,6 @@ func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile b
 
 		// If partData size is less than or equal to partSize, this is the last part.
 		if len(partData) <= partSize {
-			partCount = partNumber
 			stop = true
 		} else {
 			oneByte = partData[len(partData)-1:]
@@ -336,8 +327,6 @@ func uploadFile(filePath string) error {
 	fmt.Println("Upload successful. Bucket Object ID:", result)
 	return nil
 }
-
-
 
 func getFileURLFromRepo(filename string) (string, error) {
 	// Extract the project slug from the filename
