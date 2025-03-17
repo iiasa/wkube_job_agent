@@ -33,7 +33,5 @@ else
 fi
 
 chmod +x "$binary_file"
-echo "Executing init task..."
-./"$binary_file" PRE "python pretask.py"
 
 

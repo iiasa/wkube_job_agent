@@ -1,5 +1,3 @@
-module github.com/iiasa/wkube-agent
+module github.com/iiasa/wkube-job-agent
 
 go 1.19
-
-require github.com/google/uuid v1.6.0 // indirect

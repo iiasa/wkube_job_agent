@@ -9,4 +9,4 @@ fi
 
 chmod +x "$binary_file"
 echo "Executing binary..."
-./"$binary_file" MAIN "bash command"
+./"$binary_file" "bash command"
