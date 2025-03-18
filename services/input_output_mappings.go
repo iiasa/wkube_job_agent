@@ -54,10 +54,47 @@ func remoteCopy(source, destination string) error {
 }
 
 func remotePush(source, destination string) error {
-	if err := config.UploadFile(source, destination); err != nil {
+
+	destination = strings.TrimRight(destination, string(os.PathSeparator))
+
+	info, err := os.Stat(source)
+	if err != nil {
 		return err
 	}
-	return nil
+
+	if !info.IsDir() {
+		if err := config.UploadFile(source, destination); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	return filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+
+		// Join paths safely, ensuring no double slashes
+		destPath := filepath.Join(destination, relPath)
+
+		if err := config.UploadFile(path, destPath); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	// if err := config.UploadFile(source, destination); err != nil {
+	// 	return err
+	// }
+	// return nil
 }
 
 // inputMappingFromMountedStorage creates a symlink from source to destination.
