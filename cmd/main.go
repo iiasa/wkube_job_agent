@@ -18,7 +18,7 @@ func main() {
 	defer func() {
 		if errOccurred != nil {
 			if err := config.UpdateJobStatus("ERROR"); err != nil {
-				fmt.Fprintf(config.MultiLogWriter, "Error updating status to ERROR: %v", err)
+				fmt.Fprintf(config.MultiLogWriter, "Error updating status to ERROR: %v \n", err)
 			}
 		}
 

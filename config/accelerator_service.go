@@ -378,6 +378,9 @@ func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile b
 }
 
 func UploadFile(localPath string, remotePath string) error {
+
+	fmt.Fprintf(MultiLogWriter, "Uploading file: %s to remote job output folder at %s \n", localPath, remotePath)
+
 	// Open the files
 	file, err := os.Open(localPath)
 	if err != nil {
@@ -391,7 +394,7 @@ func UploadFile(localPath string, remotePath string) error {
 		return fmt.Errorf("error uploading file: %v", err)
 	}
 
-	fmt.Println("Upload successful. Bucket Object ID:", *result)
+	fmt.Fprintf(MultiLogWriter, "Upload successful. Bucket Object ID: %d \n", *result)
 	return nil
 }
 
@@ -483,7 +486,7 @@ func DownloadFileFromRepo(filename, outputPath string) error {
 		return fmt.Errorf("error downloading file: %v", err)
 	}
 
-	fmt.Printf("File downloaded successfully to %s\n", outputPath)
+	fmt.Fprintf(MultiLogWriter, "File downloaded successfully to %s\n", outputPath)
 	return nil
 }
 

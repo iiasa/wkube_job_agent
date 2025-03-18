@@ -44,7 +44,7 @@ func remoteCopy(source, destination string) error {
 		}
 
 		// Download the file
-		fmt.Printf("Downloading file: %s\n", file)
+		fmt.Fprintf(config.MultiLogWriter, "Downloading file: %s\n", file)
 		if err := config.DownloadFileFromRepo(file, destinationFile); err != nil {
 			return fmt.Errorf("error downloading file: %v", err)
 		}
@@ -352,6 +352,8 @@ func postProcessOutputMappings(outputMappings []string) ([]func(), error) {
 
 func PreProcessMappings() error {
 
+	fmt.Fprintln(config.MultiLogWriter, "Pre process input/output mappings started")
+
 	// Retrieve input and output mappings from environment variables
 	inputMappings := os.Getenv("input_mappings")
 	outputMappings := os.Getenv("output_mappings")
@@ -390,12 +392,13 @@ func PreProcessMappings() error {
 	}()
 	wg.Wait()
 
-	fmt.Println("Pre process input/output mappings completed")
+	fmt.Fprintln(config.MultiLogWriter, "Pre process input/output mappings completed")
 
 	return nil
 }
 
 func PostProcessMappings() error {
+	fmt.Fprintln(config.MultiLogWriter, "Post process output mappings started ")
 
 	outputMappings := os.Getenv("output_mappings")
 
@@ -419,7 +422,7 @@ func PostProcessMappings() error {
 	}()
 	wg.Wait()
 
-	fmt.Println("Post process output mappings completed completed")
+	fmt.Fprintln(config.MultiLogWriter, "Post process output mappings completed")
 
 	return nil
 }

@@ -37,5 +37,4 @@ func Init() {
 
 	os.Stdout = os.NewFile(uintptr(1), "/dev/stdout") // You can skip this if you are on Unix-like system
 
-	// fmt.Fprintln(MultiLogWriter, "This is a test log.")
 }
