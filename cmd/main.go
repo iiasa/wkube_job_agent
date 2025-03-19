@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime/debug"
 
 	"github.com/iiasa/wkube-job-agent/config"
 	"github.com/iiasa/wkube-job-agent/services"
@@ -16,7 +17,10 @@ func main() {
 	var errOccurred error
 
 	defer func() {
-		if errOccurred != nil {
+
+		if r := recover(); r != nil {
+			fmt.Fprintf(config.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
+		} else if errOccurred != nil {
 			if err := config.UpdateJobStatus("ERROR"); err != nil {
 				fmt.Fprintf(config.MultiLogWriter, "Error updating status to ERROR: %v \n", err)
 			}

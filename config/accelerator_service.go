@@ -249,7 +249,7 @@ func readPartData(stream io.Reader, size int, partData []byte) ([]byte, error) {
 
 func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile bool) (result *int, err error) {
 	partSize := 100 * 1024 * 1024
-	var uploadIDDetailsResponse *MultipartUploadIDCreateResponse
+	var uploadIDDetailsResponse = &MultipartUploadIDCreateResponse{}
 	var oneByte []byte
 	stop := false
 	partNumber := 0
