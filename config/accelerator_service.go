@@ -633,7 +633,7 @@ func CheckHealth() error {
 	}
 
 	if !healthCheckResponse.IsHealthy {
-		return fmt.Errorf("process is not healthy. exiting")
+		os.Exit(1)
 	}
 
 	return nil

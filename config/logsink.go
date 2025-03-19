@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -27,7 +28,9 @@ func NewRemoteLogger() *RemoteLogger {
 	// Periodically send logs
 	go func() {
 		for range rl.tick.C {
-			rl.Send()
+			if err := rl.Send(); err != nil {
+				fmt.Fprintf(os.Stdout, "Failed to send logs to remote sink: %v", err)
+			}
 		}
 	}()
 
@@ -72,7 +75,7 @@ func (rl *RemoteLogger) Send() error {
 	} else {
 		// Buffer is empty, still check health
 		if err := CheckHealth(); err != nil {
-			return fmt.Errorf("health check failed - %v", err)
+			return fmt.Errorf("health check mechanism failed - %v", err)
 		}
 	}
 
