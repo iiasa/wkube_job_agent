@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -87,8 +88,8 @@ type MultipartUploadIDCreateResponse struct {
 
 // getPutCreateMultipartUploadID retrieves a multipart upload ID for creating a new upload.
 func getPutCreateMultipartUploadID(filename string) (*MultipartUploadIDCreateResponse, error) {
-
-	endpoint := fmt.Sprintf("/create-multipart-upload-id/%s", filename)
+	encodedFilename := url.PathEscape(filename)
+	endpoint := fmt.Sprintf("/create-multipart-upload-id/%s", encodedFilename)
 	req, err := CreateRequest("GET", endpoint, nil)
 
 	if err != nil {

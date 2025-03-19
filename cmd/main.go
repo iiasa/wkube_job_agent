@@ -28,7 +28,7 @@ func main() {
 		}
 
 		if err := config.RemoteLogSink.Send(); err != nil {
-			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink.")
+			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
 		}
 
 	}()
