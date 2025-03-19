@@ -20,15 +20,13 @@ func main() {
 			if err := config.UpdateJobStatus("ERROR"); err != nil {
 				fmt.Fprintf(config.MultiLogWriter, "Error updating status to ERROR: %v \n", err)
 			}
+			fmt.Fprintf(config.MultiLogWriter, "Error: %v \n", errOccurred)
 		}
 
 		if err := config.RemoteLogSink.Send(); err != nil {
 			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink.")
-			os.Exit(1)
 		}
-		if errOccurred != nil {
-			os.Exit(1)
-		}
+
 	}()
 
 	if len(os.Args) < 2 {
