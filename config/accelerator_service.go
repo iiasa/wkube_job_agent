@@ -70,7 +70,6 @@ func HandleHTTPError(resp *http.Response) error {
 	return fmt.Errorf("received status %d, response: %s", resp.StatusCode, body)
 }
 
-// getMultipartPutCreateSignedURL retrieves a signed URL for creating a multipart upload.
 func getMultipartPutCreateSignedURL(appBucketID, objectName, uploadID string, partNumber int) (*string, error) {
 	endpoint := fmt.Sprintf("/put-create-signed-url?app_bucket_id=%s&object_name=%s&upload_id=%s&part_number=%d", appBucketID, objectName, uploadID, partNumber)
 	req, err := CreateRequest("GET", endpoint, nil)
@@ -451,18 +450,12 @@ func getFileURLFromRepo(filename string) (string, error) {
 	}
 
 	// Decode the response
-	var result map[string]interface{}
+	var result string
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("error decoding response: %v", err)
 	}
 
-	// Extract the download URL
-	downloadURL, ok := result["url"].(string)
-	if !ok {
-		return "", errors.New("download URL not found in response")
-	}
-
-	return downloadURL, nil
+	return result, nil
 }
 
 // downloadFileFromURL downloads a file from the given URL and saves it to the specified path.
