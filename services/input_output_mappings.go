@@ -10,11 +10,10 @@ import (
 	"github.com/iiasa/wkube-job-agent/config"
 )
 
-// remoteCopy copies files from a source prefix to a destination directory.
 func remoteCopy(source, destination string) error {
 	files, err := config.EnumerateFilesByPrefix(source)
 	if err != nil {
-		return fmt.Errorf("error enumerating files- %v", err) // Stop program on error
+		return fmt.Errorf("error enumerating files- %v", err)
 	}
 
 	if len(files) > 1 && !strings.HasSuffix(destination, "/") {

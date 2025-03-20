@@ -53,6 +53,23 @@ func CreateRequest(method, endpoint string, body []byte) (*http.Request, error) 
 	return req, nil
 }
 
+func HandleHTTPError(resp *http.Response) error {
+	if resp == nil {
+		return fmt.Errorf("response is nil with status")
+	}
+
+	var body string
+	if resp.Body != nil {
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response body (status %d): %w", resp.StatusCode, err)
+		}
+		body = string(b)
+	}
+
+	return fmt.Errorf("received status %d, response: %s", resp.StatusCode, body)
+}
+
 // getMultipartPutCreateSignedURL retrieves a signed URL for creating a multipart upload.
 func getMultipartPutCreateSignedURL(appBucketID, objectName, uploadID string, partNumber int) (*string, error) {
 	endpoint := fmt.Sprintf("/put-create-signed-url?app_bucket_id=%s&object_name=%s&upload_id=%s&part_number=%d", appBucketID, objectName, uploadID, partNumber)
@@ -69,7 +86,8 @@ func getMultipartPutCreateSignedURL(appBucketID, objectName, uploadID string, pa
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("cannot create put signed url")
+		err := HandleHTTPError(resp)
+		return nil, fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
 	}
 
 	var result string
@@ -103,7 +121,8 @@ func getPutCreateMultipartUploadID(filename string) (*MultipartUploadIDCreateRes
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("create-multipart-upload-id returned not okay status %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return nil, fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
 	}
 
 	var result MultipartUploadIDCreateResponse
@@ -135,7 +154,9 @@ func completeJobMultipartUpload(appBucketID, filename, uploadID string, parts []
 		return nil, err
 	}
 
-	req, err := CreateRequest("PUT", "/complete-create-multipart-upload", body)
+	endpoint := "/complete-create-multipart-upload"
+
+	req, err := CreateRequest("PUT", endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +168,8 @@ func completeJobMultipartUpload(appBucketID, filename, uploadID string, parts []
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("complete-create-multipart-upload returned not okay status %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return nil, fmt.Errorf("PUT %s returned not okay status %v", endpoint, err)
 	}
 
 	var result *int
@@ -171,7 +193,9 @@ func abortCreateMultipartUpload(appBucketID, filename, uploadID string) (*bool, 
 		return nil, err
 	}
 
-	req, err := CreateRequest("PUT", "/abort-create-multipart-upload", body)
+	endpoint := "/abort-create-multipart-upload"
+
+	req, err := CreateRequest("PUT", endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +207,8 @@ func abortCreateMultipartUpload(appBucketID, filename, uploadID string) (*bool, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("/abort-create-multipart-upload returned not okay status %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return nil, fmt.Errorf("PUT %s returned not okay status %v", endpoint, err)
 	}
 
 	var result *bool
@@ -218,7 +243,8 @@ func EnumerateFilesByPrefix(prefix string) ([]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("enumerate-all-files returned not okay status %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return nil, fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
 	}
 
 	// Decode the response
@@ -420,7 +446,8 @@ func getFileURLFromRepo(filename string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("get-file-download-url returned not okay status %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return "", fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
 	}
 
 	// Decode the response
@@ -462,7 +489,8 @@ func downloadFileFromURL(url, outputPath string) error {
 
 	// Check if the response status is OK
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed with status: %s", resp.Status)
+		err := HandleHTTPError(resp)
+		return fmt.Errorf("GET %s returned not okay status %v", url, err)
 	}
 
 	// Copy the response body to the output file
@@ -524,7 +552,9 @@ func UpdateJobStatus(newStatus string) error {
 		return fmt.Errorf("error marshaling event data json request: %v", err)
 	}
 
-	req, err := CreateRequest("POST", "/webhook-event/", jsonEventData)
+	endpoint := "/webhook-event/"
+
+	req, err := CreateRequest("POST", endpoint, jsonEventData)
 	if err != nil {
 		return err
 	}
@@ -536,7 +566,8 @@ func UpdateJobStatus(newStatus string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status update response status code: %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return fmt.Errorf("POST %s returned not okay status %v", endpoint, err)
 	}
 
 	return nil
@@ -556,7 +587,8 @@ func SendBatch(lines []byte, logFilename string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response code while getting signed URL: %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return fmt.Errorf("GET %s returned not okay status %v", signedURLEndpoint, err)
 	}
 
 	var signedURLResponse SignedURLResponse
@@ -577,7 +609,8 @@ func SendBatch(lines []byte, logFilename string) error {
 	defer putResp.Body.Close()
 
 	if putResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response code while sending chunk: %d", putResp.StatusCode)
+		err := HandleHTTPError(putResp)
+		return fmt.Errorf("PUT %s returned not okay status %v", signedURLResponse.UploadURL, err)
 	}
 
 	// Register log file
@@ -590,7 +623,9 @@ func SendBatch(lines []byte, logFilename string) error {
 		return fmt.Errorf("error encoding post data: %v", err)
 	}
 
-	postReq, err := CreateRequest("POST", "/register-log-file/", postDataBytes)
+	registerEndpoint := "/register-log-file/"
+
+	postReq, err := CreateRequest("POST", registerEndpoint, postDataBytes)
 	if err != nil {
 		return err
 	}
@@ -602,7 +637,8 @@ func SendBatch(lines []byte, logFilename string) error {
 	defer postResp.Body.Close()
 
 	if postResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response code while registering chunk: %d", postResp.StatusCode)
+		err := HandleHTTPError(postResp)
+		return fmt.Errorf("POST %s returned not okay status %v", registerEndpoint, err)
 	}
 
 	if !signedURLResponse.IsHealthy {
@@ -613,7 +649,8 @@ func SendBatch(lines []byte, logFilename string) error {
 }
 
 func CheckHealth() error {
-	req, err := CreateRequest("GET", "/is-healthy/", nil)
+	endpoint := "/is-healthy/"
+	req, err := CreateRequest("GET", endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -625,7 +662,8 @@ func CheckHealth() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response code while checking health: %d", resp.StatusCode)
+		err := HandleHTTPError(resp)
+		return fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
 	}
 
 	var healthCheckResponse HealthCheckResponse
