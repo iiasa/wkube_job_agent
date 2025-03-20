@@ -419,8 +419,13 @@ func PreProcessMappings() error {
 	}()
 	wg.Wait()
 
-	if err := <-errChan; err != nil {
-		return fmt.Errorf("pre process input/output mappings: %w", err)
+	select {
+	case err := <-errChan:
+		if err != nil {
+			return fmt.Errorf("pre process input/output mappings: %w", err)
+		}
+	default:
+		// No error occurred, continue
 	}
 
 	fmt.Fprintln(config.MultiLogWriter, "Pre process input/output mappings completed")
@@ -459,8 +464,13 @@ func PostProcessMappings() error {
 	}()
 	wg.Wait()
 
-	if err := <-errChan; err != nil {
-		return fmt.Errorf("post processing failed: %w", err)
+	select {
+	case err := <-errChan:
+		if err != nil {
+			return fmt.Errorf("post processing failed: %w", err)
+		}
+	default:
+		// No error occurred, continue
 	}
 
 	fmt.Fprintln(config.MultiLogWriter, "Post process output mappings completed")

@@ -381,7 +381,7 @@ func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile b
 
 	select {
 	case err = <-errChan:
-		return nil, err
+		return nil, fmt.Errorf("error uploading part of multipart upload: %w", err)
 	default:
 	}
 
