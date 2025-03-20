@@ -173,7 +173,9 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 
 			selectedFoldersFromEnv := os.Getenv("selected_foldernames")
 
-			if selectedFoldersFromEnv != "" {
+			if selectedFoldersFromEnv == "" {
+				return nil, fmt.Errorf("error: selected_folders referenced in source no folder selection detected")
+			} else {
 				selectedFolders := strings.Split(selectedFoldersFromEnv, ",")
 
 				var newMappings []string
@@ -208,7 +210,9 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 
 			selectedFilesFromEnv := os.Getenv("selected_filenames")
 
-			if selectedFilesFromEnv != "" {
+			if selectedFilesFromEnv == "" {
+				return nil, fmt.Errorf("error: selected_files referenced in source no file selection detected")
+			} else {
 				selectedFiles := strings.Split(selectedFilesFromEnv, ",")
 
 				var newMappings []string
