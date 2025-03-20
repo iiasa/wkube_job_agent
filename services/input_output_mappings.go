@@ -102,7 +102,7 @@ func inputMappingFromMountedStorage(source, destination string) error {
 
 	// Check if the source exists
 	if _, err := os.Stat(source); os.IsNotExist(err) {
-		return fmt.Errorf("error: source does not exist: %s", source)
+		return fmt.Errorf("error: source does not exist: %s : %v", source, err)
 	}
 
 	// Ensure the destination directory exists
@@ -391,13 +391,13 @@ func PreProcessMappings() error {
 	inputMappingsTaskQueue, err := processInputMappings(allInputMappings)
 
 	if err != nil {
-		return fmt.Errorf("error: error preparing input mappings")
+		return fmt.Errorf("error: error preparing input mappings %v", err)
 	}
 
 	outputMappingsTaskQueue, err := preProcessOutputMappings(allOutputMappings)
 
 	if err != nil {
-		return fmt.Errorf("error: error preparing pre processing task queue")
+		return fmt.Errorf("error: error preparing pre processing task queue %v", err)
 	}
 
 	taskQueue := append(inputMappingsTaskQueue, outputMappingsTaskQueue...)
@@ -420,6 +420,10 @@ func PreProcessMappings() error {
 	}()
 	wg.Wait()
 
+	if err := <-errChan; err != nil {
+		return fmt.Errorf("pre process input/output mappings: %w", err)
+	}
+
 	fmt.Fprintln(config.MultiLogWriter, "Pre process input/output mappings completed")
 
 	return nil
@@ -435,7 +439,7 @@ func PostProcessMappings() error {
 	taskQueue, err := postProcessOutputMappings(allOutputMappings)
 
 	if err != nil {
-		return fmt.Errorf("error: error preparing post processing task queue")
+		return fmt.Errorf("error: error preparing post processing task queue %v", err)
 	}
 
 	errChan := make(chan error, 1)

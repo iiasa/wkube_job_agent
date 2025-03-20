@@ -606,7 +606,7 @@ func SendBatch(lines []byte, logFilename string) error {
 	}
 
 	if !signedURLResponse.IsHealthy {
-		return fmt.Errorf("process is not healthy. exiting")
+		os.Exit(1)
 	}
 
 	return nil
