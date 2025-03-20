@@ -380,10 +380,6 @@ func PreProcessMappings() error {
 	inputMappings := os.Getenv("input_mappings")
 	outputMappings := os.Getenv("output_mappings")
 
-	if inputMappings == "" || outputMappings == "" {
-		return fmt.Errorf("error: input_mappings or output_mappings environment variables not set")
-	}
-
 	allInputMappings := strings.Split(inputMappings, ";")
 	allOutputMappings := strings.Split(outputMappings, ";")
 
