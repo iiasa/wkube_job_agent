@@ -221,9 +221,7 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 					for _, selectedFile := range selectedFiles {
 
 						if selectedFile != "" {
-							splittedPath := strings.Split(selectedFile, "/")
-							filename := splittedPath[len(splittedPath)-1]
-							newDestination := fmt.Sprintf("%s/%s", destination, filename)
+							newDestination := fmt.Sprintf("%s/%s", destination, selectedFile)
 							newMapping := fmt.Sprintf("acc://%s:%s", selectedFile, newDestination)
 							newMappings = append(newMappings, newMapping)
 						}
