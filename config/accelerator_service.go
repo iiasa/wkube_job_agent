@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -384,6 +386,13 @@ func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile b
 		return nil, fmt.Errorf("error uploading part of multipart upload: %w", err)
 	default:
 	}
+
+	// Sort the parts array by partNumber (converted to integer) before calling completeJobMultipartUpload
+	sort.Slice(parts, func(i, j int) bool {
+		partNumberI, _ := strconv.Atoi(parts[i][0])
+		partNumberJ, _ := strconv.Atoi(parts[j][0])
+		return partNumberI < partNumberJ
+	})
 
 	// Complete the upload only if everything is successful
 	result, err = completeJobMultipartUpload(uploadIDDetailsResponse.AppBucketID,
