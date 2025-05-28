@@ -258,17 +258,17 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 			return nil, fmt.Errorf("error: invalid destination path: always use absolute path")
 		}
 
-		if strings.HasPrefix(source, "__acc__") {
-			source = strings.TrimPrefix(source, "__acc__")
+		if strings.HasPrefix(source, "/mnt/data") {
 			taskQueue = append(taskQueue, func() error {
-				if err := remoteCopy(source, destination); err != nil {
+				if err := inputMappingFromMountedStorage(source, destination); err != nil {
 					return err
 				}
 				return nil
 			})
-		} else if strings.HasPrefix(source, "/mnt/data") {
+		} else if strings.HasPrefix(source, "__acc__") {
+			source = strings.TrimPrefix(source, "__acc__")
 			taskQueue = append(taskQueue, func() error {
-				if err := inputMappingFromMountedStorage(source, destination); err != nil {
+				if err := remoteCopy(source, destination); err != nil {
 					return err
 				}
 				return nil
