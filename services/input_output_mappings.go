@@ -96,16 +96,27 @@ func remotePush(source, destination string) error {
 	// return nil
 }
 
-// inputMappingFromMountedStorage creates a symlink from source to destination.
 func inputMappingFromMountedStorage(source, destination string) error {
 
-	// Check if the source exists
 	if _, err := os.Stat(source); os.IsNotExist(err) {
-		return fmt.Errorf("error: source does not exist: %s : %v", source, err)
+
+		if len(source) > 0 && source[len(source)-1] == '/' {
+
+			err := os.MkdirAll(source, 0775)
+			if err != nil {
+				return fmt.Errorf("error: creating directory for data mapping from mounted storage '%s': %w", source, err)
+			}
+			fmt.Printf("Directory for data mapping from mounted storage '%s'.\n", source)
+			return nil
+		} else {
+
+			return fmt.Errorf("error: file for data mounting from mounted storage does not exists: %s", source)
+		}
+
 	}
 
 	// Ensure the destination directory exists
-	if err := os.MkdirAll(filepath.Dir(destination), os.ModePerm); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destination), 0775); err != nil {
 		return fmt.Errorf("error creating directory: %v", err)
 	}
 
