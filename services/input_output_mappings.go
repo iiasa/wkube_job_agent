@@ -134,6 +134,8 @@ func inputMappingFromMountedStorage(source, destination string) error {
 		return fmt.Errorf("error checking destination '%s': %v", destination, err)
 	}
 
+	destination = strings.TrimRight(destination, "/")
+
 	// Create the symlink
 	if err := os.Symlink(source, destination); err != nil {
 		return fmt.Errorf("error creating symlink: %v", err)

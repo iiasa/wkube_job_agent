@@ -6,4 +6,4 @@ This agent injects into a wkube job, performs data mapping on startup and finali
 `go run main.go "bash command"`
 
 ## Build
-`env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o wagt-v1.2.5-linux-amd/wagt cmd/main.go`
+`env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o wagt-v1.2.6-linux-amd/wagt cmd/main.go`
