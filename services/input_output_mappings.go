@@ -106,8 +106,6 @@ func inputMappingFromMountedStorage(source, destination string) error {
 			if err != nil {
 				return fmt.Errorf("error: creating directory for data mapping from mounted storage '%s': %w", source, err)
 			}
-			fmt.Printf("Directory for data mapping from mounted storage '%s'.\n", source)
-			return nil
 		} else {
 
 			return fmt.Errorf("error: file for data mounting from mounted storage does not exists: %s", source)
