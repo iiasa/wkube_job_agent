@@ -41,6 +41,8 @@ func main() {
 	command := os.Args[1]
 	cmd := exec.Command("/bin/sh", "-c", command)
 
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+
 	cmd.Stdout = config.MultiLogWriter
 	cmd.Stderr = config.MultiLogWriter
 
