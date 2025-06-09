@@ -159,7 +159,8 @@ func outputMappingToMountedStorage(source, destination string) error {
 	fmt.Printf("Performing output mapping to mounted source using inputMappingFromMountedStorage by switching source and destination.\n")
 
 	// Same logic as input mapping as it will be done together that is before the job states.
-	return inputMappingFromMountedStorage(destination, source)
+	// source and destination with respect to output mapping has already been changed by callee
+	return inputMappingFromMountedStorage(source, destination)
 }
 
 func processInputMappings(inputMappings []string) ([]func() error, []func() error, error) {
