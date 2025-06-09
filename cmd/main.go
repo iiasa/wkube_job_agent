@@ -62,7 +62,6 @@ func main() {
 		return
 	}
 
-	// List DEBUG_WKUBE_MAPPING_PATH before starting the command if set
 	checkAndListDebugPath("BEFORE STARTING COMMAND")
 
 	// Start command
@@ -77,9 +76,6 @@ func main() {
 		return
 	}
 
-	// List DEBUG_WKUBE_MAPPING_PATH after command has finished if set
-	checkAndListDebugPath("AFTER COMMAND FINISHED")
-
 	if err := config.UpdateJobStatus("MAPPING_OUTPUTS"); err != nil {
 		errOccurred = fmt.Errorf("error updating status to MAPPING_OUTPUTS: %v", err)
 		return
@@ -89,6 +85,8 @@ func main() {
 		errOccurred = fmt.Errorf("error in post-process-mappings: %v", err)
 		return
 	}
+
+	checkAndListDebugPath("AFTER COMMAND FINISHED")
 
 	if err := config.UpdateJobStatus("DONE"); err != nil {
 		errOccurred = fmt.Errorf("error updating status to DONE: %v", err)
