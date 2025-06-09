@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 
 	"github.com/iiasa/wkube-job-agent/config"
@@ -61,6 +62,9 @@ func main() {
 		return
 	}
 
+	// List DEBUG_WKUBE_MAPPING_PATH before starting the command if set
+	checkAndListDebugPath("BEFORE STARTING COMMAND")
+
 	// Start command
 	if err := cmd.Start(); err != nil {
 		errOccurred = fmt.Errorf("error starting command: %v", err)
@@ -72,6 +76,9 @@ func main() {
 		errOccurred = fmt.Errorf("command execution error: %v", err)
 		return
 	}
+
+	// List DEBUG_WKUBE_MAPPING_PATH after command has finished if set
+	checkAndListDebugPath("AFTER COMMAND FINISHED")
 
 	if err := config.UpdateJobStatus("MAPPING_OUTPUTS"); err != nil {
 		errOccurred = fmt.Errorf("error updating status to MAPPING_OUTPUTS: %v", err)
@@ -88,4 +95,64 @@ func main() {
 		return
 	}
 
+}
+
+func checkAndListDebugPath(context string) {
+	debugPath := os.Getenv("DEBUG_WKUBE_MAPPING_PATH")
+	if debugPath == "" {
+		return
+	}
+
+	fmt.Fprintf(config.MultiLogWriter, "DEBUG_WKUBE_MAPPING_PATH is set — listing %q (%s):\n", debugPath, context)
+
+	info, err := os.Stat(debugPath)
+	if os.IsNotExist(err) {
+		fmt.Fprintf(config.MultiLogWriter, "%q does not exist\n", debugPath)
+		return
+	} else if err != nil {
+		fmt.Fprintf(config.MultiLogWriter, "Error checking %q: %v\n", debugPath, err)
+		return
+	} else if !info.IsDir() {
+		fmt.Fprintf(config.MultiLogWriter, "%q exists but is not a directory\n", debugPath)
+		return
+	}
+
+	err = filepath.Walk(debugPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Fprintf(config.MultiLogWriter, "Error accessing %q: %v\n", path, err)
+			return err
+		}
+
+		// Use Lstat to detect symlink
+		lstatInfo, lerr := os.Lstat(path)
+		if lerr != nil {
+			fmt.Fprintf(config.MultiLogWriter, "Error lstat %q: %v\n", path, lerr)
+			return lerr
+		}
+
+		mode := lstatInfo.Mode()
+
+		switch {
+		case mode&os.ModeSymlink != 0:
+			// It's a symlink — print target
+			target, terr := os.Readlink(path)
+			if terr != nil {
+				fmt.Fprintf(config.MultiLogWriter, "[LINK] %s -> (error reading link target: %v)\n", path, terr)
+			} else {
+				fmt.Fprintf(config.MultiLogWriter, "[LINK] %s -> %s\n", path, target)
+			}
+		case mode.IsDir():
+			fmt.Fprintf(config.MultiLogWriter, "[DIR ] %s\n", path)
+		case mode.IsRegular():
+			fmt.Fprintf(config.MultiLogWriter, "[FILE] %s\n", path)
+		default:
+			fmt.Fprintf(config.MultiLogWriter, "[OTHER] %s (mode: %v)\n", path, mode)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		fmt.Fprintf(config.MultiLogWriter, "Error walking %q: %v\n", debugPath, err)
+	}
 }
