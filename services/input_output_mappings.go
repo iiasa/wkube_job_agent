@@ -4,11 +4,36 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/iiasa/wkube-job-agent/config"
 )
+
+func pathStartsWithAllowedMountPoint(path string) (bool, error) {
+	env := os.Getenv("ALLOWED_MOUNT_POINTS")
+	if env == "" {
+		return false, fmt.Errorf("environment variable ALLOWED_MOUNT_POINTS is not set")
+	}
+
+	prefixes := strings.Split(env, ",")
+
+	// Escape each prefix to safely include in regex
+	for i, prefix := range prefixes {
+		prefixes[i] = regexp.QuoteMeta(strings.TrimSpace(prefix))
+	}
+
+	// Join them into a regex pattern like ^(\/mnt\/data|\/mnt\/sd)
+	pattern := fmt.Sprintf(`^(%s)`, strings.Join(prefixes, "|"))
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return false, fmt.Errorf("invalid regex pattern compiled from ALLOWED_MOUNT_POINTS: %w", err)
+	}
+
+	return re.MatchString(path), nil
+}
 
 func remoteCopy(source, destination string) error {
 	files, err := config.EnumerateFilesByPrefix(source)
@@ -184,7 +209,12 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 		source := splittedInputMapping[0]
 		destination := splittedInputMapping[1]
 
-		if !strings.HasPrefix(source, "__acc__") && !strings.HasPrefix(source, "/mnt/data") && source != "selected_files" && source != "selected_folders" {
+		sourceStartsWithAllowedMountPoint, err := pathStartsWithAllowedMountPoint(source)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error: %v", err)
+		}
+
+		if !strings.HasPrefix(source, "__acc__") && !sourceStartsWithAllowedMountPoint && source != "selected_files" && source != "selected_folders" {
 			return nil, nil, fmt.Errorf("error: invalid source in input mappings")
 		}
 
@@ -281,7 +311,7 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 			return nil, nil, fmt.Errorf("error: invalid destination path: always use absolute path")
 		}
 
-		if strings.HasPrefix(source, "/mnt/data") {
+		if sourceStartsWithAllowedMountPoint {
 			symlinkTaskQueue = append(symlinkTaskQueue, func() error {
 				if err := inputMappingFromMountedStorage(source, destination); err != nil {
 					return err
@@ -328,7 +358,12 @@ func preProcessOutputMappings(outputMappings []string) ([]func() error, []func()
 			return nil, nil, fmt.Errorf("error: please use absolute URI for source")
 		}
 
-		if !strings.HasPrefix(destination, "__acc__") && !strings.HasPrefix(destination, "/mnt/data") {
+		destinationStartsWithAllowedMountPoint, err := pathStartsWithAllowedMountPoint(destination)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error: %v", err)
+		}
+
+		if !strings.HasPrefix(destination, "__acc__") && !destinationStartsWithAllowedMountPoint {
 			return nil, nil, fmt.Errorf("error: invalid destination in output mappings")
 		}
 
@@ -336,7 +371,7 @@ func preProcessOutputMappings(outputMappings []string) ([]func() error, []func()
 			destination = "__acc__" + source
 		}
 
-		if strings.HasPrefix(destination, "/mnt/data") {
+		if destinationStartsWithAllowedMountPoint {
 			symlinkTaskQueue = append(taskQueue, func() error {
 				if err := outputMappingToMountedStorage(destination, source); err != nil {
 					return err
@@ -374,7 +409,12 @@ func postProcessOutputMappings(outputMappings []string) ([]func() error, error) 
 			return nil, fmt.Errorf("error: please use absolute URI for source")
 		}
 
-		if !strings.HasPrefix(destination, "__acc__") && !strings.HasPrefix(destination, "/mnt/data") {
+		destinationStartsWithAllowedMountPoint, err := pathStartsWithAllowedMountPoint(destination)
+		if err != nil {
+			return nil, fmt.Errorf("error: %v", err)
+		}
+
+		if !strings.HasPrefix(destination, "__acc__") && !destinationStartsWithAllowedMountPoint {
 			return nil, fmt.Errorf("error: invalid destination in output mappings")
 		}
 

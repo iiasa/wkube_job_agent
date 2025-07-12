@@ -64,6 +64,15 @@ func main() {
 
 	checkAndListDebugPath("BEFORE STARTING COMMAND")
 
+	if socketAddress := os.Getenv("interactive_socket"); socketAddress != "" {
+		err := services.StartTunnelWithRestart(socketAddress)
+
+		errOccurred = fmt.Errorf("error setting up interactive tunnel: %v", err)
+
+		return
+
+	}
+
 	// Start command
 	if err := cmd.Start(); err != nil {
 		errOccurred = fmt.Errorf("error starting command: %v", err)
