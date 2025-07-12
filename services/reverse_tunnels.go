@@ -11,10 +11,10 @@ import (
 )
 
 func startReverseTunnel(localSocket string) error {
-	sshUser := os.Getenv("SSH_USER")
-	sshServer := os.Getenv("SSH_SERVER")
+	sshUser := os.Getenv("TUNNEL_GATEWAY_SSH_USER")
+	sshServer := os.Getenv("TUNNEL_GATEWAY_SSH_SERVER")
 	tunnelGatewayDomain := os.Getenv("TUNNEL_GATEWAY_DOMAIN")
-	sshKey := os.Getenv("SSH_PRIVATE_KEY")
+	sshKey := os.Getenv("TUNNEL_GATEWAY_SSH_PRIVATE_KEY")
 	podID := os.Getenv("POD_ID")
 
 	if sshUser == "" || sshServer == "" || sshKey == "" || podID == "" || tunnelGatewayDomain == "" {
