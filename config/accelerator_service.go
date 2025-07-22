@@ -73,7 +73,7 @@ func HandleHTTPError(resp *http.Response) error {
 }
 
 func getMultipartPutCreateSignedURL(appBucketID int, objectName, uploadID string, partNumber int) (*string, error) {
-	endpoint := fmt.Sprintf("/put-create-signed-url?app_bucket_id=%s&object_name=%s&upload_id=%s&part_number=%d", appBucketID, objectName, uploadID, partNumber)
+	endpoint := fmt.Sprintf("/put-create-signed-url?app_bucket_id=%d&object_name=%s&upload_id=%s&part_number=%d", appBucketID, objectName, uploadID, partNumber)
 	req, err := CreateRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
