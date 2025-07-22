@@ -72,7 +72,7 @@ func HandleHTTPError(resp *http.Response) error {
 	return fmt.Errorf("received status %d, response: %s", resp.StatusCode, body)
 }
 
-func getMultipartPutCreateSignedURL(appBucketID, objectName, uploadID string, partNumber int) (*string, error) {
+func getMultipartPutCreateSignedURL(appBucketID int, objectName, uploadID string, partNumber int) (*string, error) {
 	endpoint := fmt.Sprintf("/put-create-signed-url?app_bucket_id=%s&object_name=%s&upload_id=%s&part_number=%d", appBucketID, objectName, uploadID, partNumber)
 	req, err := CreateRequest("GET", endpoint, nil)
 	if err != nil {
@@ -101,7 +101,7 @@ func getMultipartPutCreateSignedURL(appBucketID, objectName, uploadID string, pa
 
 type MultipartUploadIDCreateResponse struct {
 	UploadID           string `json:"upload_id"`
-	AppBucketID        string `json:"app_bucket_id"`
+	AppBucketID        int    `json:"app_bucket_id"`
 	UniquifiedFilename string `json:"uniqified_filename"`
 }
 
@@ -135,7 +135,7 @@ func getPutCreateMultipartUploadID(filename string) (*MultipartUploadIDCreateRes
 }
 
 // completeJobMultipartUpload completes a multipart upload for a job.
-func completeJobMultipartUpload(appBucketID, filename, uploadID string, parts [][]string, isLogFile bool) (*int, error) {
+func completeJobMultipartUpload(appBucketID int, filename, uploadID string, parts [][]string, isLogFile bool) (*int, error) {
 	partsJSON, err := json.Marshal(parts)
 	if err != nil {
 		return nil, err
@@ -182,7 +182,7 @@ func completeJobMultipartUpload(appBucketID, filename, uploadID string, parts []
 }
 
 // abortCreateMultipartUpload aborts a multipart upload for creation.
-func abortCreateMultipartUpload(appBucketID, filename, uploadID string) (*bool, error) {
+func abortCreateMultipartUpload(appBucketID int, filename, uploadID string) (*bool, error) {
 	payload := map[string]interface{}{
 		"app_bucket_id": appBucketID,
 		"filename":      filename,
