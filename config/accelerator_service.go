@@ -651,8 +651,13 @@ func SendBatch(lines []byte, logFilename string) error {
 }
 
 func CheckHealth() error {
+	statsJson, err := GetStatJson()
+	if err != nil {
+		return fmt.Errorf("error generating stats: %v", err)
+	}
+
 	endpoint := "/is-healthy/"
-	req, err := CreateRequest("GET", endpoint, nil)
+	req, err := CreateRequest("POST", endpoint, statsJson)
 	if err != nil {
 		return err
 	}
@@ -665,7 +670,7 @@ func CheckHealth() error {
 
 	if resp.StatusCode != http.StatusOK {
 		err := HandleHTTPError(resp)
-		return fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
+		return fmt.Errorf("POST %s returned not okay status %v", endpoint, err)
 	}
 
 	var healthCheckResponse HealthCheckResponse
