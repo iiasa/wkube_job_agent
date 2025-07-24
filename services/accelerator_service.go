@@ -643,21 +643,18 @@ func SendBatch(lines []byte, logFilename string) error {
 		return fmt.Errorf("POST %s returned not okay status %v", registerEndpoint, err)
 	}
 
-	// if !signedURLResponse.IsHealthy {
-	// 	os.Exit(1)
-	// }
+	if !signedURLResponse.IsHealthy {
+		if err := PostProcessMappings(); err != nil {
+			return fmt.Errorf("error in post-process-mappings upon bad health of job: %v", err)
+		}
+	}
 
 	return nil
 }
 
 func CheckHealth() error {
-	statsJson, err := GetStatJson()
-	if err != nil {
-		return fmt.Errorf("error generating stats: %v", err)
-	}
-
 	endpoint := "/is-healthy/"
-	req, err := CreateRequest("POST", endpoint, statsJson)
+	req, err := CreateRequest("GET", endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -670,7 +667,7 @@ func CheckHealth() error {
 
 	if resp.StatusCode != http.StatusOK {
 		err := HandleHTTPError(resp)
-		return fmt.Errorf("POST %s returned not okay status %v", endpoint, err)
+		return fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
 	}
 
 	var healthCheckResponse HealthCheckResponse
