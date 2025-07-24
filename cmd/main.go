@@ -82,6 +82,12 @@ func main() {
 	go func() {
 		sig := <-sigChan
 		fmt.Fprintf(services.MultiLogWriter, "Received signal: %s — forwarding to child process\n", sig)
+		if err := services.VerboseResourceReport(); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
+		}
+		if err := services.RemoteLogSink.Send(); err != nil {
+			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
+		}
 		if cmd.Process != nil {
 			_ = cmd.Process.Signal(sig)
 		}

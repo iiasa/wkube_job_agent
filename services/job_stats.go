@@ -1,157 +1,154 @@
 package services
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 )
 
-type StatReport struct {
-	Timestamp        time.Time `json:"timestamp"`
-	WorkingDir       DiskUsage `json:"working_dir"`
-	Memory           MemUsage  `json:"memory"`
-	CPUPercent       float64   `json:"cpu_percent"`
-	CPUThrottledUsec uint64    `json:"cpu_throttled_usec"`
+// You must have this defined somewhere in your package:
+// var MultiLogWriter io.Writer
+
+func bytesToGB(b uint64) float64 {
+	return float64(b) / (1024 * 1024 * 1024)
 }
 
-type DiskUsage struct {
-	UsedBytes uint64 `json:"used_bytes"`
-}
-
-type MemUsage struct {
-	Used        uint64  `json:"used"`
-	Total       uint64  `json:"total"`
-	UsedPercent float64 `json:"used_percent"`
-}
-
-// Detects if system uses cgroup v2
-func isCgroupV2() bool {
-	_, err := os.Stat("/sys/fs/cgroup/cgroup.controllers")
-	return err == nil
-}
-
-func getMemoryUsageV2() (used uint64, limit uint64, usedPercent float64, err error) {
-	if !isCgroupV2() {
-		err = fmt.Errorf("cgroup v1 not implemented for memory stats")
-		return
+func VerboseResourceReport() error {
+	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err != nil {
+		return fmt.Errorf("cgroup v1 is not supported")
 	}
 
-	usedBytes, err := os.ReadFile("/sys/fs/cgroup/memory.current")
+	// ------------------ CPU Stats -------------------
+	cpuData, err := os.ReadFile("/sys/fs/cgroup/cpu.stat")
 	if err != nil {
-		return
-	}
-	limitBytes, err := os.ReadFile("/sys/fs/cgroup/memory.max")
-	if err != nil {
-		return
+		return fmt.Errorf("failed to read cpu.stat: %v", err)
 	}
 
-	used, _ = strconv.ParseUint(strings.TrimSpace(string(usedBytes)), 10, 64)
+	var usage, user, system, throttled, periods, throttledPeriods uint64
 
-	limitStr := strings.TrimSpace(string(limitBytes))
-	if limitStr == "max" {
-		limit = used
-		usedPercent = 100.0
-	} else {
-		limit, _ = strconv.ParseUint(limitStr, 10, 64)
-		usedPercent = float64(used) / float64(limit) * 100
-	}
-
-	return
-}
-
-func readCPUStats() (usage, throttled uint64, err error) {
-	if !isCgroupV2() {
-		err = fmt.Errorf("cgroup v1 not implemented for CPU stats")
-		return
-	}
-
-	data, err := os.ReadFile("/sys/fs/cgroup/cpu.stat")
-	if err != nil {
-		return
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "usage_usec") {
-			fields := strings.Fields(line)
-			if len(fields) == 2 {
-				usage, _ = strconv.ParseUint(fields[1], 10, 64)
-			}
-		} else if strings.HasPrefix(line, "throttled_usec") {
-			fields := strings.Fields(line)
-			if len(fields) == 2 {
-				throttled, _ = strconv.ParseUint(fields[1], 10, 64)
-			}
+	for _, line := range strings.Split(string(cpuData), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		val, _ := strconv.ParseUint(fields[1], 10, 64)
+		switch fields[0] {
+		case "usage_usec":
+			usage = val
+		case "user_usec":
+			user = val
+		case "system_usec":
+			system = val
+		case "throttled_usec":
+			throttled = val
+		case "nr_periods":
+			periods = val
+		case "nr_throttled":
+			throttledPeriods = val
 		}
 	}
-	return
-}
 
-func getCPUPercentAndThrottle(duration time.Duration) (percent float64, throttledDelta uint64, err error) {
-	startUsage, startThrottled, err := readCPUStats()
+	cpuMaxData, err := os.ReadFile("/sys/fs/cgroup/cpu.max")
 	if err != nil {
-		return
+		return fmt.Errorf("failed to read cpu.max: %v", err)
 	}
-	time.Sleep(duration)
-	endUsage, endThrottled, err := readCPUStats()
+	cpuParts := strings.Fields(string(cpuMaxData))
+	var quota, period uint64
+	if cpuParts[0] != "max" {
+		quota, _ = strconv.ParseUint(cpuParts[0], 10, 64)
+	}
+	period, _ = strconv.ParseUint(cpuParts[1], 10, 64)
+
+	throttleRatio := float64(throttledPeriods) / float64(periods) * 100
+	throttleTimeSec := float64(throttled) / 1e6
+	cpuUsageSec := float64(usage) / 1e6
+
+	var quotaCores, allowedCPUTime, efficiency float64
+	if quota > 0 && period > 0 {
+		quotaCores = float64(quota) / float64(period)
+		allowedCPUTime = float64(periods*quota) / 1e6
+		efficiency = cpuUsageSec / allowedCPUTime * 100
+	}
+
+	// ------------------ Memory Stats -------------------
+	readUint := func(path string) (uint64, error) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return 0, err
+		}
+		str := strings.TrimSpace(string(data))
+		if str == "max" {
+			return 0, nil
+		}
+		return strconv.ParseUint(str, 10, 64)
+	}
+
+	memCurrent, err := readUint("/sys/fs/cgroup/memory.current")
 	if err != nil {
-		return
+		return fmt.Errorf("failed to read memory.current: %v", err)
+	}
+	memPeak, err := readUint("/sys/fs/cgroup/memory.peak")
+	if err != nil {
+		return fmt.Errorf("failed to read memory.peak: %v", err)
+	}
+	memMaxRaw, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	if err != nil {
+		return fmt.Errorf("failed to read memory.max: %v", err)
+	}
+	memMaxStr := strings.TrimSpace(string(memMaxRaw))
+	var memLimit uint64
+	var memPercent float64
+	if memMaxStr == "max" {
+		memLimit = 0
+		memPercent = 0
+	} else {
+		memLimit, _ = strconv.ParseUint(memMaxStr, 10, 64)
+		memPercent = float64(memCurrent) / float64(memLimit) * 100
 	}
 
-	deltaUsage := float64(endUsage-startUsage) / 1_000_000.0 // microseconds → seconds
-	throttledDelta = endThrottled - startThrottled
-	percent = (deltaUsage / duration.Seconds()) * 100.0
-	return
-}
-
-func getWorkingDirDiskUsage() (uint64, error) {
+	// ------------------ Disk Usage -------------------
 	cmd := exec.Command("du", "-sb", ".")
 	output, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("failed to execute du: %v", err)
+		return fmt.Errorf("failed to execute du: %v", err)
 	}
-	fields := strings.Fields(string(output))
-	if len(fields) < 1 {
-		return 0, fmt.Errorf("unexpected du output: %s", output)
-	}
-	return strconv.ParseUint(fields[0], 10, 64)
-}
+	duFields := strings.Fields(string(output))
+	diskUsageBytes, _ := strconv.ParseUint(duFields[0], 10, 64)
 
-func GetStatJson() ([]byte, error) {
-	if !isCgroupV2() {
-		return nil, fmt.Errorf("cgroup v1 is not implemented for stats collection")
-	}
+	// ------------------ Print Report -------------------
+	w := MultiLogWriter
+	fmt.Fprintf(w, "\n📊 Resource Usage Report:\n")
 
-	usedBytes, err := getWorkingDirDiskUsage()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get working dir disk usage: %v", err)
-	}
-
-	memUsed, memLimit, memPercent, err := getMemoryUsageV2()
-	if err != nil {
-		return nil, err
+	fmt.Fprintf(w, "\n🧠 Memory:\n")
+	fmt.Fprintf(w, "- Current usage:             %.2f GB\n", bytesToGB(memCurrent))
+	fmt.Fprintf(w, "- Peak usage:                %.2f GB\n", bytesToGB(memPeak))
+	if memLimit > 0 {
+		fmt.Fprintf(w, "- Memory limit:              %.2f GB\n", bytesToGB(memLimit))
+		fmt.Fprintf(w, "- Memory usage:              %.2f%% of limit\n", memPercent)
+	} else {
+		fmt.Fprintf(w, "- Memory limit:              unlimited\n")
 	}
 
-	cpuPercent, throttledUsec, err := getCPUPercentAndThrottle(time.Second)
-	if err != nil {
-		return nil, err
+	fmt.Fprintf(w, "\n🖥️  CPU:\n")
+	fmt.Fprintf(w, "- Total CPU time used:       %.3f sec\n", cpuUsageSec)
+	fmt.Fprintf(w, "- User mode time:            %.3f sec\n", float64(user)/1e6)
+	fmt.Fprintf(w, "- System mode time:          %.3f sec\n", float64(system)/1e6)
+	fmt.Fprintf(w, "- Quota enforcement periods: %d\n", periods)
+	fmt.Fprintf(w, "- Throttled periods:         %d (%.2f%%)\n", throttledPeriods, throttleRatio)
+	fmt.Fprintf(w, "- Throttled time:            %.3f sec\n", throttleTimeSec)
+
+	if quota > 0 {
+		fmt.Fprintf(w, "- CPU quota:                 %.2f core(s) per period\n", quotaCores)
+		fmt.Fprintf(w, "- Allowed CPU time:          %.3f sec\n", allowedCPUTime)
+		fmt.Fprintf(w, "- CPU efficiency:            %.2f%%\n", efficiency)
+	} else {
+		fmt.Fprintf(w, "- CPU quota:                 unlimited (no throttling expected)\n")
 	}
 
-	report := StatReport{
-		Timestamp: time.Now().UTC(),
-		WorkingDir: DiskUsage{
-			UsedBytes: usedBytes,
-		},
-		Memory: MemUsage{
-			Used:        memUsed,
-			Total:       memLimit,
-			UsedPercent: memPercent,
-		},
-		CPUPercent:       cpuPercent,
-		CPUThrottledUsec: throttledUsec,
-	}
+	fmt.Fprintf(w, "\n📂 Working Directory:\n")
+	fmt.Fprintf(w, "- Disk usage:                %.2f GB\n", bytesToGB(diskUsageBytes))
 
-	return json.Marshal(report)
+	return nil
 }

@@ -645,8 +645,17 @@ func SendBatch(lines []byte, logFilename string) error {
 
 	if !signedURLResponse.IsHealthy {
 		if err := PostProcessMappings(); err != nil {
-			return fmt.Errorf("error in post-process-mappings upon bad health of job: %v", err)
+			fmt.Fprintf(MultiLogWriter, "error in post-process-mappings upon bad health of job: %v", err)
 		}
+
+		if err := VerboseResourceReport(); err != nil {
+			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
+		}
+		if err := RemoteLogSink.Send(); err != nil {
+			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
+		}
+
+		os.Exit(1)
 	}
 
 	return nil
@@ -677,7 +686,13 @@ func CheckHealth() error {
 
 	if !healthCheckResponse.IsHealthy {
 		if err := PostProcessMappings(); err != nil {
-			return fmt.Errorf("error in post-process-mappings upon bad health of job: %v", err)
+			fmt.Fprintf(MultiLogWriter, "error in post-process-mappings upon bad health of job: %v", err)
+		}
+		if err := VerboseResourceReport(); err != nil {
+			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
+		}
+		if err := RemoteLogSink.Send(); err != nil {
+			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
 		}
 		os.Exit(1)
 	}
