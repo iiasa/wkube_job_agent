@@ -55,28 +55,33 @@ func (rl *RemoteLogger) Write(p []byte) (n int, err error) {
 }
 
 func (rl *RemoteLogger) Send() error {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+	errChan := make(chan error, 1)
+	go func() {
+		if err := CheckHealth(); err != nil {
+			errChan <- fmt.Errorf("health check mechanism failed - %v", err)
+		}
+	}()
 
-	if rl.buf.Len() > 0 {
-		// Generate log filename
+	rl.mu.Lock()
+	data := rl.buf.Bytes()
+	rl.buf.Reset()
+	rl.mu.Unlock()
+
+	if len(data) > 0 {
 		counterMu.Lock()
 		logFilename := fmt.Sprintf("wkube%d", logCounter)
 		logCounter++
 		counterMu.Unlock()
 
-		// Send log batch
-		data := rl.buf.Bytes()
-		rl.buf.Reset()
-		err := SendBatch(data, logFilename)
-		if err != nil {
+		if err := SendBatch(data, logFilename); err != nil {
 			return fmt.Errorf("error sending logs - %v", err)
 		}
-	} else {
-		// Buffer is empty, still check health
-		if err := CheckHealth(); err != nil {
-			return fmt.Errorf("health check mechanism failed - %v", err)
-		}
+	}
+
+	select {
+	case err := <-errChan:
+		return err
+	default:
 	}
 
 	return nil

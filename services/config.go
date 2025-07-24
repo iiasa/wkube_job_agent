@@ -70,7 +70,7 @@ func Init() {
 	HTTPClient = &http.Client{
 		Transport: &RetryTransport{
 			Base:       transport,
-			MaxRetries: 5,
+			MaxRetries: 3,
 			Backoff:    1 * time.Second,
 		},
 	}

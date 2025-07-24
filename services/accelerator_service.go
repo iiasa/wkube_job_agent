@@ -616,36 +616,36 @@ func SendBatch(lines []byte, logFilename string) error {
 	}
 
 	// Register log file
-	postData := map[string]interface{}{
-		"filename":      signedURLResponse.Filename,
-		"app_bucket_id": signedURLResponse.AppBucketId,
-	}
-	postDataBytes, err := json.Marshal(postData)
-	if err != nil {
-		return fmt.Errorf("error encoding post data: %v", err)
-	}
+	// postData := map[string]interface{}{
+	// 	"filename":      signedURLResponse.Filename,
+	// 	"app_bucket_id": signedURLResponse.AppBucketId,
+	// }
+	// postDataBytes, err := json.Marshal(postData)
+	// if err != nil {
+	// 	return fmt.Errorf("error encoding post data: %v", err)
+	// }
 
-	registerEndpoint := "/register-log-file/"
+	// registerEndpoint := "/register-log-file/"
 
-	postReq, err := CreateRequest("POST", registerEndpoint, postDataBytes)
-	if err != nil {
-		return err
-	}
+	// postReq, err := CreateRequest("POST", registerEndpoint, postDataBytes)
+	// if err != nil {
+	// 	return err
+	// }
 
-	postResp, err := HTTPClient.Do(postReq)
-	if err != nil {
-		return fmt.Errorf("error sending POST request to register chunk: %v", err)
-	}
-	defer postResp.Body.Close()
+	// postResp, err := HTTPClient.Do(postReq)
+	// if err != nil {
+	// 	return fmt.Errorf("error sending POST request to register chunk: %v", err)
+	// }
+	// defer postResp.Body.Close()
 
-	if postResp.StatusCode != http.StatusOK {
-		err := HandleHTTPError(postResp)
-		return fmt.Errorf("POST %s returned not okay status %v", registerEndpoint, err)
-	}
+	// if postResp.StatusCode != http.StatusOK {
+	// 	err := HandleHTTPError(postResp)
+	// 	return fmt.Errorf("POST %s returned not okay status %v", registerEndpoint, err)
+	// }
 
-	if !signedURLResponse.IsHealthy {
-		os.Exit(1)
-	}
+	// if !signedURLResponse.IsHealthy {
+	// 	os.Exit(1)
+	// }
 
 	return nil
 }
@@ -680,7 +680,7 @@ func CheckHealth() error {
 
 	if !healthCheckResponse.IsHealthy {
 		if err := PostProcessMappings(); err != nil {
-			return fmt.Errorf("error in post-process-mappings: %v", err)
+			return fmt.Errorf("error in post-process-mappings upon bad health of job: %v", err)
 		}
 		os.Exit(1)
 	}
