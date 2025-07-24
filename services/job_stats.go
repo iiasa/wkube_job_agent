@@ -11,6 +11,7 @@ import (
 )
 
 type StatReport struct {
+	Timestamp  time.Time `json:"timestamp"`
 	DiskRoot   DiskUsage `json:"disk_root"`
 	DiskData   DiskUsage `json:"disk_data"`
 	EmptyDir   DiskUsage `json:"empty_dir"`
@@ -66,6 +67,7 @@ func GetStatJson() ([]byte, error) {
 	}
 
 	report := StatReport{
+		Timestamp: time.Now().UTC(),
 		DiskRoot: DiskUsage{
 			Used:        diskRoot.Used,
 			Total:       diskRoot.Total,
