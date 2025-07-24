@@ -37,18 +37,26 @@ func NewRemoteLogger() *RemoteLogger {
 	return rl
 }
 
-const maxBufferSize = 5 * 1024 * 1024
+const maxBufferSize = 1 * 1024 * 1024
 
-var trimMsg = []byte("\n[Logs trimmed due to buffer size. Please log to file for full logs...]\n")
+var trimMsg = []byte("\n[Logs trimmed due to buffer size limit. Please log to file for full logs...]\n")
 
 func (rl *RemoteLogger) Write(p []byte) (n int, err error) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	requiredSpace := rl.buf.Len() + len(p) - maxBufferSize
+
 	if requiredSpace > 0 {
+
 		rl.buf.Next(requiredSpace)
-		rl.buf.Write(trimMsg)
+
+		tmp := &bytes.Buffer{}
+		tmp.Write(trimMsg)
+		tmp.Write(rl.buf.Bytes())
+
+		rl.buf.Reset()
+		rl.buf.Write(tmp.Bytes())
 	}
 
 	return rl.buf.Write(p)
