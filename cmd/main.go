@@ -4,20 +4,26 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"syscall"
 
 	"github.com/iiasa/wkube-job-agent/services"
 )
 
 func main() {
-
 	services.Init()
 
 	var errOccurred error
+	var cmd *exec.Cmd
 
+	// Signal handler
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	// Setup deferred panic/error handling
 	defer func() {
-
 		if r := recover(); r != nil {
 			fmt.Fprintf(services.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
 		} else if errOccurred != nil {
@@ -30,7 +36,6 @@ func main() {
 		if err := services.RemoteLogSink.Send(); err != nil {
 			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
 		}
-
 	}()
 
 	if len(os.Args) < 2 {
@@ -39,10 +44,8 @@ func main() {
 	}
 
 	command := os.Args[1]
-	cmd := exec.Command("/bin/sh", "-c", command)
-
+	cmd = exec.Command("/bin/sh", "-c", command)
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
-
 	cmd.Stdout = services.MultiLogWriter
 	cmd.Stderr = services.MultiLogWriter
 
@@ -65,20 +68,26 @@ func main() {
 
 	if socketAddress := os.Getenv("interactive_socket"); socketAddress != "" {
 		err := services.StartTunnelWithRestart(socketAddress)
-
 		errOccurred = fmt.Errorf("error setting up interactive tunnel: %v", err)
-
 		return
-
 	}
 
-	// Start command
+	// Start the command
 	if err := cmd.Start(); err != nil {
 		errOccurred = fmt.Errorf("error starting command: %v", err)
 		return
 	}
 
-	// Wait for the command to finish
+	// Forward SIGTERM to child process
+	go func() {
+		sig := <-sigChan
+		fmt.Fprintf(services.MultiLogWriter, "Received signal: %s — forwarding to child process\n", sig)
+		if cmd.Process != nil {
+			_ = cmd.Process.Signal(sig)
+		}
+	}()
+
+	// Wait for command to complete
 	if err := cmd.Wait(); err != nil {
 		errOccurred = fmt.Errorf("command execution error: %v", err)
 		return
@@ -100,7 +109,6 @@ func main() {
 		errOccurred = fmt.Errorf("error updating status to DONE: %v", err)
 		return
 	}
-
 }
 
 func checkAndListDebugPath(context string) {
