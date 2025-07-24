@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-
-	"github.com/iiasa/wkube-job-agent/config"
 )
 
 func pathStartsWithAllowedMountPoint(path string) (bool, error) {
@@ -36,7 +34,7 @@ func pathStartsWithAllowedMountPoint(path string) (bool, error) {
 }
 
 func remoteCopy(source, destination string) error {
-	files, err := config.EnumerateFilesByPrefix(source)
+	files, err := EnumerateFilesByPrefix(source)
 	if err != nil {
 		return fmt.Errorf("error enumerating files- %v", err)
 	}
@@ -68,8 +66,8 @@ func remoteCopy(source, destination string) error {
 		}
 
 		// Download the file
-		fmt.Fprintf(config.MultiLogWriter, "Downloading file: %s\n", file)
-		if err := config.DownloadFileFromRepo(file, destinationFile); err != nil {
+		fmt.Fprintf(MultiLogWriter, "Downloading file: %s\n", file)
+		if err := DownloadFileFromRepo(file, destinationFile); err != nil {
 			return fmt.Errorf("error downloading file: %v", err)
 		}
 	}
@@ -87,7 +85,7 @@ func remotePush(source, destination string) error {
 	}
 
 	if !info.IsDir() {
-		if err := config.UploadFile(source, destination); err != nil {
+		if err := UploadFile(source, destination); err != nil {
 			return err
 		}
 		return nil
@@ -109,13 +107,13 @@ func remotePush(source, destination string) error {
 		// Join paths safely, ensuring no double slashes
 		destPath := filepath.Join(destination, relPath)
 
-		if err := config.UploadFile(path, destPath); err != nil {
+		if err := UploadFile(path, destPath); err != nil {
 			return err
 		}
 		return nil
 	})
 
-	// if err := config.UploadFile(source, destination); err != nil {
+	// if err := UploadFile(source, destination); err != nil {
 	// 	return err
 	// }
 	// return nil
@@ -437,7 +435,7 @@ func postProcessOutputMappings(outputMappings []string) ([]func() error, error) 
 
 func PreProcessMappings() error {
 
-	fmt.Fprintln(config.MultiLogWriter, "Pre process input/output mappings started")
+	fmt.Fprintln(MultiLogWriter, "Pre process input/output mappings started")
 
 	inputMappings := os.Getenv("input_mappings")
 	outputMappings := os.Getenv("output_mappings")
@@ -496,13 +494,13 @@ func PreProcessMappings() error {
 		// No error occurred, continue
 	}
 
-	fmt.Fprintln(config.MultiLogWriter, "Pre process input/output mappings completed")
+	fmt.Fprintln(MultiLogWriter, "Pre process input/output mappings completed")
 
 	return nil
 }
 
 func PostProcessMappings() error {
-	fmt.Fprintln(config.MultiLogWriter, "Post process output mappings started ")
+	fmt.Fprintln(MultiLogWriter, "Post process output mappings started ")
 
 	outputMappings := os.Getenv("output_mappings")
 
@@ -541,7 +539,7 @@ func PostProcessMappings() error {
 		// No error occurred, continue
 	}
 
-	fmt.Fprintln(config.MultiLogWriter, "Post process output mappings completed")
+	fmt.Fprintln(MultiLogWriter, "Post process output mappings completed")
 
 	return nil
 }

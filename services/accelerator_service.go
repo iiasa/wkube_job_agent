@@ -1,4 +1,4 @@
-package config
+package services
 
 import (
 	"bytes"
@@ -679,6 +679,9 @@ func CheckHealth() error {
 	}
 
 	if !healthCheckResponse.IsHealthy {
+		if err := PostProcessMappings(); err != nil {
+			return fmt.Errorf("error in post-process-mappings: %v", err)
+		}
 		os.Exit(1)
 	}
 

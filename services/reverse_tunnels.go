@@ -6,8 +6,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"github.com/iiasa/wkube-job-agent/config"
 )
 
 func startReverseTunnel(localSocket string) error {
@@ -48,23 +46,23 @@ func startReverseTunnel(localSocket string) error {
 	if strings.HasPrefix(localSocket, "unix:") {
 		unixPath := strings.TrimPrefix(localSocket, "unix:")
 		sshArgs = append(sshArgs, "-R", remoteSocketPath+":"+unixPath)
-		fmt.Fprintf(config.MultiLogWriter, "Setting up UNIX → UNIX tunnel: %s -> %s \n", remoteSocketPath, unixPath)
+		fmt.Fprintf(MultiLogWriter, "Setting up UNIX → UNIX tunnel: %s -> %s \n", remoteSocketPath, unixPath)
 	} else {
 		sshArgs = append(sshArgs, "-R", remoteSocketPath+":"+localSocket)
-		fmt.Fprintf(config.MultiLogWriter, "Setting up TCP → UNIX tunnel: %s -> %s", remoteSocketPath, localSocket)
+		fmt.Fprintf(MultiLogWriter, "Setting up TCP → UNIX tunnel: %s -> %s", remoteSocketPath, localSocket)
 	}
 
 	sshArgs = append(sshArgs, sshUser+"@"+sshServer)
 
 	cmd := exec.Command("/mnt/agent/ssh", sshArgs...)
-	cmd.Stdout = config.MultiLogWriter
-	cmd.Stderr = config.MultiLogWriter
+	cmd.Stdout = MultiLogWriter
+	cmd.Stderr = MultiLogWriter
 
-	fmt.Fprintf(config.MultiLogWriter, "Starting reverse tunnel with command: ssh %s", strings.Join(sshArgs, " "))
+	fmt.Fprintf(MultiLogWriter, "Starting reverse tunnel with command: ssh %s", strings.Join(sshArgs, " "))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start SSH reverse tunnel: %v", err)
 	} else {
-		fmt.Fprintf(config.MultiLogWriter, "Interactive socket tunneled at: %s.%s", podID, tunnelGatewayDomain)
+		fmt.Fprintf(MultiLogWriter, "Interactive socket tunneled at: %s.%s", podID, tunnelGatewayDomain)
 	}
 
 	return nil
@@ -74,7 +72,7 @@ func StartTunnelWithRestart(localSocket string) error {
 	errCh := make(chan error, 1)
 	go func() {
 		for {
-			fmt.Fprintln(config.MultiLogWriter, "Starting reverse tunnel...")
+			fmt.Fprintln(MultiLogWriter, "Starting reverse tunnel...")
 			err := startReverseTunnel(localSocket) // return proper error to capture error..refer other implementation
 			if err != nil {
 
@@ -82,7 +80,7 @@ func StartTunnelWithRestart(localSocket string) error {
 				return // exit goroutine
 			} else {
 
-				fmt.Fprintln(config.MultiLogWriter, "Tunnel exited normally")
+				fmt.Fprintln(MultiLogWriter, "Tunnel exited normally")
 			}
 
 			// Optional: add backoff delay before retry
