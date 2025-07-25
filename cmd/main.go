@@ -109,12 +109,17 @@ func main() {
 		return
 	}
 
+	if err := services.VerboseResourceReport(); err != nil {
+		fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
+	}
+
 	checkAndListDebugPath("AFTER COMMAND FINISHED")
 
 	if err := services.UpdateJobStatus("DONE"); err != nil {
 		errOccurred = fmt.Errorf("error updating status to DONE: %v", err)
 		return
 	}
+	services.RemoteLogSink.Close()
 }
 
 func checkAndListDebugPath(context string) {

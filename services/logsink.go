@@ -89,3 +89,7 @@ func (rl *RemoteLogger) Send() error {
 
 	return nil
 }
+
+func (rl *RemoteLogger) Close() {
+	rl.tick.Stop()
+}
