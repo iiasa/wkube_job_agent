@@ -25,6 +25,7 @@ type RemoteLogger struct {
 	done        chan struct{}
 	droppedLogs int
 	mu          sync.Mutex
+	wg          sync.WaitGroup
 }
 
 func NewRemoteLogger() *RemoteLogger {
@@ -33,6 +34,7 @@ func NewRemoteLogger() *RemoteLogger {
 		done:    make(chan struct{}),
 	}
 
+	rl.wg.Add(1)
 	go rl.run()
 
 	return rl
@@ -52,6 +54,7 @@ func (rl *RemoteLogger) Write(p []byte) (int, error) {
 func (rl *RemoteLogger) run() {
 	tick := time.NewTicker(logFlushInterval)
 	defer tick.Stop()
+	defer rl.wg.Done()
 
 	for {
 		select {
@@ -118,4 +121,5 @@ func (rl *RemoteLogger) getAndResetDroppedCount() int {
 
 func (rl *RemoteLogger) Close() {
 	close(rl.done)
+	rl.wg.Wait()
 }

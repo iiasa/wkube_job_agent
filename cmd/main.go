@@ -33,6 +33,10 @@ func main() {
 			fmt.Fprintf(services.MultiLogWriter, "Error: %v \n", errOccurred)
 		}
 
+		if err := services.VerboseResourceReport(); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
+		}
+
 		if err := services.UploadFile("/tmp/job.log", "job.log"); err != nil {
 			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v", err)
 
@@ -114,10 +118,6 @@ func main() {
 	if err := services.PostProcessMappings(); err != nil {
 		errOccurred = fmt.Errorf("error in post-process-mappings: %v", err)
 		return
-	}
-
-	if err := services.VerboseResourceReport(); err != nil {
-		fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
 	}
 
 	checkAndListDebugPath("AFTER COMMAND FINISHED")
