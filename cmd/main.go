@@ -33,9 +33,12 @@ func main() {
 			fmt.Fprintf(services.MultiLogWriter, "Error: %v \n", errOccurred)
 		}
 
-		if err := services.RemoteLogSink.Send(); err != nil {
-			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
+		if err := services.UploadFile("/tmp/job.log", "job.log"); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v", err)
+
 		}
+
+		services.RemoteLogSink.Close()
 	}()
 
 	if len(os.Args) < 2 {
@@ -85,9 +88,13 @@ func main() {
 		if err := services.VerboseResourceReport(); err != nil {
 			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
-		if err := services.RemoteLogSink.Send(); err != nil {
-			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
+
+		if err := services.UploadFile("/tmp/job.log", "job.log"); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v", err)
 		}
+
+		services.RemoteLogSink.Close()
+
 		if cmd.Process != nil {
 			_ = cmd.Process.Signal(sig)
 		}
@@ -119,7 +126,6 @@ func main() {
 		errOccurred = fmt.Errorf("error updating status to DONE: %v", err)
 		return
 	}
-	services.RemoteLogSink.Close()
 }
 
 func checkAndListDebugPath(context string) {

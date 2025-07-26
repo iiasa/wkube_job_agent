@@ -3,7 +3,6 @@ package services
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 )
@@ -13,83 +12,110 @@ var (
 	counterMu  sync.Mutex
 )
 
+const (
+	logChannelSize   = 1000 // Drop logs if channel full
+	logFlushInterval = 10 * time.Second
+)
+
+var omittedMsgPrefix = "\n[Logs omitted: %d messages dropped due to full channel]\n"
+
 // Custom remote logger
 type RemoteLogger struct {
-	mu   sync.Mutex
-	buf  bytes.Buffer
-	tick *time.Ticker
+	logChan     chan []byte
+	done        chan struct{}
+	droppedLogs int
+	mu          sync.Mutex
 }
 
 func NewRemoteLogger() *RemoteLogger {
 	rl := &RemoteLogger{
-		tick: time.NewTicker(10 * time.Second),
+		logChan: make(chan []byte, logChannelSize),
+		done:    make(chan struct{}),
 	}
 
-	// Periodically send logs
-	go func() {
-		for range rl.tick.C {
-			if err := rl.Send(); err != nil {
-				fmt.Fprintf(os.Stdout, "Failed to send logs to remote sink: %v", err)
-			}
-		}
-	}()
+	go rl.run()
 
 	return rl
 }
 
-const maxBufferSize = 1 * 1024 * 1024
-
-var trimMsg = []byte("\n[Logs trimmed due to buffer size limit. Please log to file for full logs...]\n")
-
-func (rl *RemoteLogger) Write(p []byte) (n int, err error) {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	requiredSpace := rl.buf.Len() + len(p) - maxBufferSize
-
-	if requiredSpace > 0 {
-
-		rl.buf.Next(requiredSpace)
-
-		tmp := &bytes.Buffer{}
-		tmp.Write(trimMsg)
-		tmp.Write(rl.buf.Bytes())
-
-		rl.buf.Reset()
-		rl.buf.Write(tmp.Bytes())
+func (rl *RemoteLogger) Write(p []byte) (int, error) {
+	select {
+	case rl.logChan <- append([]byte(nil), p...): // Copy to avoid shared memory issues
+	default:
+		rl.mu.Lock()
+		rl.droppedLogs++
+		rl.mu.Unlock()
 	}
-
-	return rl.buf.Write(p)
+	return len(p), nil
 }
 
-func (rl *RemoteLogger) Send() error {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+func (rl *RemoteLogger) run() {
+	tick := time.NewTicker(logFlushInterval)
+	defer tick.Stop()
 
-	if rl.buf.Len() > 0 {
-		// Generate log filename
-		counterMu.Lock()
-		logFilename := fmt.Sprintf("wkube%d", logCounter)
-		logCounter++
-		counterMu.Unlock()
+	for {
+		select {
+		case <-tick.C:
+			rl.flushFromChannel()
 
-		// Send log batch
-		data := rl.buf.Bytes()
-		rl.buf.Reset()
-		err := SendBatch(data, logFilename)
-		if err != nil {
-			return fmt.Errorf("error sending logs - %v", err)
+		case <-rl.done:
+			rl.flushFromChannel()
+			return
 		}
-	} else {
-		// Buffer is empty, still check health
-		if err := CheckHealth(); err != nil {
-			return fmt.Errorf("health check mechanism failed - %v", err)
+	}
+}
+
+func (rl *RemoteLogger) flushFromChannel() {
+	var batch [][]byte
+
+DrainLoop:
+	for {
+		select {
+		case log := <-rl.logChan:
+			batch = append(batch, log)
+		default:
+			break DrainLoop
 		}
 	}
 
-	return nil
+	dropped := rl.getAndResetDroppedCount()
+
+	if len(batch) == 0 && dropped == 0 {
+		// Still check health even if nothing to flush
+		if err := CheckHealth(); err != nil {
+			fmt.Fprintf(MultiLogWriter, "Health check failed: %v\n", err)
+		}
+		return
+	}
+
+	var buf bytes.Buffer
+
+	if dropped > 0 {
+		buf.WriteString(fmt.Sprintf(omittedMsgPrefix, dropped))
+	}
+
+	for _, log := range batch {
+		buf.Write(log)
+	}
+
+	counterMu.Lock()
+	logFilename := fmt.Sprintf("wkube%d", logCounter)
+	logCounter++
+	counterMu.Unlock()
+
+	if err := SendBatch(buf.Bytes(), logFilename); err != nil {
+		fmt.Fprintf(MultiLogWriter, "Failed to send logs to remote sink: %v\n", err)
+	}
+}
+
+func (rl *RemoteLogger) getAndResetDroppedCount() int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	dropped := rl.droppedLogs
+	rl.droppedLogs = 0
+	return dropped
 }
 
 func (rl *RemoteLogger) Close() {
-	rl.tick.Stop()
+	close(rl.done)
 }

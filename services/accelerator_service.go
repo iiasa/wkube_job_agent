@@ -79,7 +79,7 @@ func getMultipartPutCreateSignedURL(appBucketID int, objectName, uploadID string
 		return nil, err
 	}
 
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func getPutCreateMultipartUploadID(filename string) (*MultipartUploadIDCreateRes
 		return nil, err
 	}
 
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func completeJobMultipartUpload(appBucketID int, filename, uploadID string, part
 		return nil, err
 	}
 
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func abortCreateMultipartUpload(appBucketID int, filename, uploadID string) (*bo
 		return nil, err
 	}
 
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func EnumerateFilesByPrefix(prefix string) ([]string, error) {
 	}
 
 	// Send the request
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func addFilestreamAsJobOutput(filename string, fileStream io.Reader, isLogFile b
 			}
 			req.Header.Set("Content-Type", "application/octet-stream")
 
-			resp, err := HTTPClient.Do(req)
+			resp, err := HTTPClientWithRetry.Do(req)
 			if err != nil {
 				errChan <- fmt.Errorf("error uploading part: %v", err)
 				cancel()
@@ -447,7 +447,7 @@ func getFileURLFromRepo(filename string) (string, error) {
 	}
 
 	// Send the request
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("error sending request: %v", err)
 	}
@@ -483,7 +483,7 @@ func downloadFileFromURL(url, outputPath string) error {
 	}
 
 	// Send a GET request to the download URL
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return fmt.Errorf("error downloading file: %v", err)
 	}
@@ -561,7 +561,7 @@ func UpdateJobStatus(newStatus string) error {
 		return err
 	}
 
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return fmt.Errorf("error sending status update HTTP request: %v", err)
 	}
@@ -582,7 +582,7 @@ func SendBatch(lines []byte, logFilename string) error {
 		return err
 	}
 
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return fmt.Errorf("error getting signed URL: %v", err)
 	}
@@ -632,7 +632,7 @@ func SendBatch(lines []byte, logFilename string) error {
 		return err
 	}
 
-	postResp, err := HTTPClient.Do(postReq)
+	postResp, err := HTTPClientWithRetry.Do(postReq)
 	if err != nil {
 		return fmt.Errorf("error sending POST request to register chunk: %v", err)
 	}
@@ -651,9 +651,11 @@ func SendBatch(lines []byte, logFilename string) error {
 		if err := VerboseResourceReport(); err != nil {
 			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
-		if err := RemoteLogSink.Send(); err != nil {
-			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
+
+		if err := UploadFile("/tmp/job.log", "job.log"); err != nil {
+			fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
 		}
+		RemoteLogSink.Close()
 
 		os.Exit(1)
 	}
@@ -668,7 +670,7 @@ func CheckHealth() error {
 		return err
 	}
 
-	resp, err := HTTPClient.Do(req)
+	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
 		return fmt.Errorf("error checking health: %v", err)
 	}
@@ -691,9 +693,11 @@ func CheckHealth() error {
 		if err := VerboseResourceReport(); err != nil {
 			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
-		if err := RemoteLogSink.Send(); err != nil {
-			fmt.Fprintf(os.Stdout, "Failed to flush final remaining logs to remote sink. %s", err)
+
+		if err := UploadFile("/tmp/job.log", "job.log"); err != nil {
+			fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
 		}
+		RemoteLogSink.Close()
 		os.Exit(1)
 	}
 

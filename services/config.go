@@ -7,12 +7,16 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
 var (
-	HTTPClient     *http.Client
-	RemoteLogSink  *RemoteLogger
-	MultiLogWriter io.Writer
+	HTTPClientWithRetry *http.Client
+	HTTPClient          *http.Client
+	HTTP2Client         *http.Client
+	RemoteLogSink       *RemoteLogger
+	MultiLogWriter      io.Writer
 )
 
 type RetryTransport struct {
@@ -58,8 +62,8 @@ func isRetryable(err error) bool {
 	return false
 }
 
-// Init initializes shared resources.
 func Init() {
+	// Base transport for regular HTTP/1.1
 	transport := &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		MaxIdleConns:        10,
@@ -67,18 +71,38 @@ func Init() {
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
 
-	HTTPClient = &http.Client{
+	// HTTP/2 transport setup
+	http2Transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	_ = http2.ConfigureTransport(http2Transport)
+
+	// Clients
+	HTTPClientWithRetry = &http.Client{
 		Transport: &RetryTransport{
 			Base:       transport,
-			MaxRetries: 3,
+			MaxRetries: 2,
 			Backoff:    1 * time.Second,
 		},
 	}
 
+	HTTPClient = &http.Client{
+		Transport: transport,
+	}
+
+	HTTP2Client = &http.Client{
+		Transport: &RetryTransport{
+			Base:       http2Transport,
+			MaxRetries: 2,
+			Backoff:    1 * time.Second,
+		},
+	}
+
+	logFile, err := os.OpenFile("/tmp/job.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		panic("failed to open log file: " + err.Error())
+	}
+
 	RemoteLogSink = NewRemoteLogger()
-
-	MultiLogWriter = io.MultiWriter(os.Stdout, RemoteLogSink)
-
-	// os.Stdout = os.NewFile(uintptr(1), "/dev/stdout") // You can skip this if you are on Unix-like system
-
+	MultiLogWriter = io.MultiWriter(os.Stdout, RemoteLogSink, logFile)
 }
