@@ -652,7 +652,7 @@ func SendBatch(lines []byte, logFilename string) error {
 			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
 
-		if err := UploadFile("/tmp/job.log", "job.log"); err != nil {
+		if err := UploadFile("/tmp/job.log", LogFileName); err != nil {
 			fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
 		}
 		RemoteLogSink.Close()
@@ -694,7 +694,7 @@ func CheckHealth() error {
 			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
 
-		if err := UploadFile("/tmp/job.log", "job.log"); err != nil {
+		if err := UploadFile("/tmp/job.log", LogFileName); err != nil {
 			fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
 		}
 		RemoteLogSink.Close()

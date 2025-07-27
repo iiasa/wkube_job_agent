@@ -105,9 +105,9 @@ func Init() {
 		podID = "unknown" // fallback if POD_ID is not set
 	}
 
-	LogFileName := fmt.Sprintf("/tmp/job-%s.log", podID)
+	LogFileName = fmt.Sprintf("job-%s.log", podID)
 
-	logFile, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile("/tmp/job.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		panic("failed to open log file: " + err.Error())
 	}
