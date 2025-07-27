@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -64,7 +65,7 @@ func isRetryable(err error) bool {
 	return false
 }
 
-func Init() {
+func Init(ctx context.Context, cancel context.CancelFunc) {
 	// Base transport for regular HTTP/1.1
 	transport := &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
@@ -112,6 +113,6 @@ func Init() {
 		panic("failed to open log file: " + err.Error())
 	}
 
-	RemoteLogSink = NewRemoteLogger()
+	RemoteLogSink = NewRemoteLogger(ctx, cancel)
 	MultiLogWriter = io.MultiWriter(os.Stdout, RemoteLogSink, logFile)
 }

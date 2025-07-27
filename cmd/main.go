@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,8 +13,18 @@ import (
 	"github.com/iiasa/wkube-job-agent/services"
 )
 
+func abortIfCancelled(ctx context.Context, where string) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("context cancelled during %s — aborting", where)
+	}
+
+	return nil
+}
+
 func main() {
-	services.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	services.Init(ctx, cancel)
 
 	var errOccurred error
 	var cmd *exec.Cmd
@@ -22,7 +33,12 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
-	// Setup deferred panic/error handling
+	go func() {
+		sig := <-sigChan
+		fmt.Fprintf(services.MultiLogWriter, "Received signal: %s — forwarding to child process\n", sig)
+		cancel() // cancel the context (kill command and stop goroutines)
+	}()
+
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(services.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
@@ -31,6 +47,11 @@ func main() {
 				fmt.Fprintf(services.MultiLogWriter, "Error updating status to ERROR: %v \n", err)
 			}
 			fmt.Fprintf(services.MultiLogWriter, "Error: %v \n", errOccurred)
+		}
+
+		if err := services.PostProcessMappings(); err != nil {
+			errOccurred = fmt.Errorf("error in post-process-mappings: %v", err)
+			return
 		}
 
 		if err := services.VerboseResourceReport(); err != nil {
@@ -42,7 +63,7 @@ func main() {
 
 		}
 
-		services.RemoteLogSink.Close()
+		services.RemoteLogSink.FinalFlush()
 	}()
 
 	if len(os.Args) < 2 {
@@ -51,7 +72,9 @@ func main() {
 	}
 
 	command := os.Args[1]
-	cmd = exec.Command("/bin/sh", "-c", command)
+	// cmd = exec.Command("/bin/sh", "-c", command)
+	cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	cmd.Stdout = services.MultiLogWriter
 	cmd.Stderr = services.MultiLogWriter
@@ -63,6 +86,11 @@ func main() {
 
 	if err := services.PreProcessMappings(); err != nil {
 		errOccurred = fmt.Errorf("error in pre-process-mappings: %v", err)
+		return
+	}
+
+	if err := abortIfCancelled(ctx, "input mappings"); err != nil {
+		errOccurred = fmt.Errorf("%v", err)
 		return
 	}
 
@@ -79,44 +107,30 @@ func main() {
 		return
 	}
 
+	if err := abortIfCancelled(ctx, "tunnel setup"); err != nil {
+		errOccurred = fmt.Errorf("%v", err)
+		return
+	}
+
 	// Start the command
 	if err := cmd.Start(); err != nil {
 		errOccurred = fmt.Errorf("error starting command: %v", err)
 		return
 	}
 
-	// Forward SIGTERM to child process
-	go func() {
-		sig := <-sigChan
-		fmt.Fprintf(services.MultiLogWriter, "Received signal: %s — forwarding to child process\n", sig)
-		if err := services.VerboseResourceReport(); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
-		}
-
-		if err := services.UploadFile("/tmp/job.log", services.LogFileName); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v", err)
-		}
-
-		services.RemoteLogSink.Close()
-
-		if cmd.Process != nil {
-			_ = cmd.Process.Signal(sig)
-		}
-	}()
-
 	// Wait for command to complete
 	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			fmt.Fprintf(services.MultiLogWriter, "Command interrupted due to context cancellation: %v\n", ctx.Err())
+			return
+		}
+
 		errOccurred = fmt.Errorf("command execution error: %v", err)
 		return
 	}
 
 	if err := services.UpdateJobStatus("MAPPING_OUTPUTS"); err != nil {
 		errOccurred = fmt.Errorf("error updating status to MAPPING_OUTPUTS: %v", err)
-		return
-	}
-
-	if err := services.PostProcessMappings(); err != nil {
-		errOccurred = fmt.Errorf("error in post-process-mappings: %v", err)
 		return
 	}
 

@@ -575,7 +575,7 @@ func UpdateJobStatus(newStatus string) error {
 	return nil
 }
 
-func SendBatch(lines []byte, logFilename string) error {
+func SendBatch(lines []byte, logFilename string, cancel context.CancelFunc) error {
 	signedURLEndpoint := fmt.Sprintf("/presigned-log-upload-url/?filename=%s.log", logFilename)
 	req, err := CreateRequest("GET", signedURLEndpoint, nil)
 	if err != nil {
@@ -644,26 +644,31 @@ func SendBatch(lines []byte, logFilename string) error {
 	}
 
 	if !signedURLResponse.IsHealthy {
-		if err := PostProcessMappings(); err != nil {
-			fmt.Fprintf(MultiLogWriter, "error in post-process-mappings upon bad health of job: %v", err)
-		}
 
-		if err := VerboseResourceReport(); err != nil {
-			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
-		}
+		fmt.Fprintf(MultiLogWriter, "Health check failed: job is not healthy\n")
 
-		if err := UploadFile("/tmp/job.log", LogFileName); err != nil {
-			fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
-		}
-		RemoteLogSink.Close()
+		// if err := PostProcessMappings(); err != nil {
+		// 	fmt.Fprintf(MultiLogWriter, "error in post-process-mappings upon bad health of job: %v", err)
+		// }
 
-		os.Exit(1)
+		// if err := VerboseResourceReport(); err != nil {
+		// 	fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
+		// }
+
+		// if err := UploadFile("/tmp/job.log", LogFileName); err != nil {
+		// 	fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
+		// }
+		// RemoteLogSink.Close()
+
+		if cancel != nil {
+			cancel()
+		}
 	}
 
 	return nil
 }
 
-func CheckHealth() error {
+func CheckHealth(cancel context.CancelFunc) error {
 	endpoint := "/is-healthy/"
 	req, err := CreateRequest("GET", endpoint, nil)
 	if err != nil {
@@ -687,18 +692,20 @@ func CheckHealth() error {
 	}
 
 	if !healthCheckResponse.IsHealthy {
-		if err := PostProcessMappings(); err != nil {
-			fmt.Fprintf(MultiLogWriter, "error in post-process-mappings upon bad health of job: %v", err)
-		}
-		if err := VerboseResourceReport(); err != nil {
-			fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
-		}
+		// if err := PostProcessMappings(); err != nil {
+		// 	fmt.Fprintf(MultiLogWriter, "error in post-process-mappings upon bad health of job: %v", err)
+		// }
+		// if err := VerboseResourceReport(); err != nil {
+		// 	fmt.Fprintf(MultiLogWriter, "Error generating resource report: %v\n", err)
+		// }
 
-		if err := UploadFile("/tmp/job.log", LogFileName); err != nil {
-			fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
+		// if err := UploadFile("/tmp/job.log", LogFileName); err != nil {
+		// 	fmt.Fprintf(MultiLogWriter, "error uploading job log: %v", err)
+		// }
+		// RemoteLogSink.Close()
+		if cancel != nil {
+			cancel()
 		}
-		RemoteLogSink.Close()
-		os.Exit(1)
 	}
 
 	return nil
