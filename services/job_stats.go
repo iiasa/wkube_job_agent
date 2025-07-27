@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // You must have this defined somewhere in your package:
@@ -13,6 +14,39 @@ import (
 
 func bytesToGB(b uint64) float64 {
 	return float64(b) / (1024 * 1024 * 1024)
+}
+
+func getPodUptime() (time.Duration, error) {
+	data, err := os.ReadFile("/proc/1/stat")
+	if err != nil {
+		return 0, fmt.Errorf("failed to read /proc/1/stat: %v", err)
+	}
+
+	fields := strings.Fields(string(data))
+	if len(fields) < 22 {
+		return 0, fmt.Errorf("unexpected format in /proc/1/stat")
+	}
+
+	startTimeTicks, err := strconv.ParseUint(fields[21], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse start time: %v", err)
+	}
+
+	const clkTck = 100 // Linux clock ticks per second
+	processStartSecs := float64(startTimeTicks) / float64(clkTck)
+
+	uptimeBytes, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0, fmt.Errorf("failed to read /proc/uptime: %v", err)
+	}
+	uptimeStr := strings.Fields(string(uptimeBytes))[0]
+	systemUptimeSecs, err := strconv.ParseFloat(uptimeStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse system uptime: %v", err)
+	}
+
+	uptime := systemUptimeSecs - processStartSecs
+	return time.Duration(uptime * float64(time.Second)), nil
 }
 
 func VerboseResourceReport() error {
@@ -149,6 +183,15 @@ func VerboseResourceReport() error {
 
 	fmt.Fprintf(w, "\n📂 Working Directory:\n")
 	fmt.Fprintf(w, "- Disk usage:                %.2f GB\n", bytesToGB(diskUsageBytes))
+
+	// ------------------ Uptime -------------------
+	uptime, err := getPodUptime()
+	if err != nil {
+		fmt.Fprintf(w, "\n⏱️ Uptime: failed to get uptime: %v\n", err)
+	} else {
+		fmt.Fprintf(w, "\n⏱️ Uptime:\n")
+		fmt.Fprintf(w, "- Pod/container uptime:      %s\n", uptime.Round(time.Second))
+	}
 
 	return nil
 }
