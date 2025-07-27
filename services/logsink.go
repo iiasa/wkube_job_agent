@@ -122,4 +122,6 @@ func (rl *RemoteLogger) getAndResetDroppedCount() int {
 func (rl *RemoteLogger) Close() {
 	close(rl.done)
 	rl.wg.Wait()
+
+	rl.flushFromChannel()
 }
