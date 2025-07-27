@@ -37,7 +37,7 @@ func main() {
 			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
 
-		if err := services.UploadFile("/tmp/job.log", "job.log"); err != nil {
+		if err := services.UploadFile(services.LogFileName, services.LogFileName); err != nil {
 			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v", err)
 
 		}

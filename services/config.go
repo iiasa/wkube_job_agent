@@ -2,6 +2,7 @@ package services
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ var (
 	HTTP2Client         *http.Client
 	RemoteLogSink       *RemoteLogger
 	MultiLogWriter      io.Writer
+	LogFileName         string
 )
 
 type RetryTransport struct {
@@ -98,7 +100,14 @@ func Init() {
 		},
 	}
 
-	logFile, err := os.OpenFile("/tmp/job.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	podID := os.Getenv("POD_ID")
+	if podID == "" {
+		podID = "unknown" // fallback if POD_ID is not set
+	}
+
+	LogFileName := fmt.Sprintf("/tmp/job-%s.log", podID)
+
+	logFile, err := os.OpenFile(LogFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		panic("failed to open log file: " + err.Error())
 	}
