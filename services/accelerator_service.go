@@ -542,37 +542,56 @@ type HealthCheckResponse struct {
 	IsHealthy bool `json:"is_healthy"`
 }
 
-func UpdateJobStatus(newStatus string) error {
-	statusEventData := StatusEventDataType{NewStatus: newStatus}
-	eventData := UpdateStatusEventPostData{
-		Type:            "STATUS_UPDATE",
-		StatusEventData: statusEventData,
+func SendWebhookEvent(eventType string, payload interface{}) error {
+	// Wrap payload with event type
+	eventData := map[string]interface{}{
+		"type": eventType,
+		"data": payload,
 	}
 
 	jsonEventData, err := json.Marshal(eventData)
 	if err != nil {
-		return fmt.Errorf("error marshaling event data json request: %v", err)
+		return fmt.Errorf("error marshaling webhook event JSON: %v", err)
 	}
 
 	endpoint := "/webhook-event/"
 
 	req, err := CreateRequest("POST", endpoint, jsonEventData)
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating HTTP request: %v", err)
 	}
 
 	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
-		return fmt.Errorf("error sending status update HTTP request: %v", err)
+		return fmt.Errorf("error sending webhook HTTP request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		err := HandleHTTPError(resp)
-		return fmt.Errorf("POST %s returned not okay status %v", endpoint, err)
+		return fmt.Errorf("POST %s returned non-OK status: %v", endpoint, err)
 	}
 
 	return nil
+}
+
+func UpdateJobStatus(newStatus string) error {
+	payload := StatusEventDataType{NewStatus: newStatus}
+	return SendWebhookEvent("STATUS_UPDATE", payload)
+}
+
+func ReportNodeName() error {
+	type NodeNameReportDataType struct {
+		Name string `json:"name"`
+	}
+	nodeName := os.Getenv("CLUSTER_NODE_NAME")
+	if nodeName == "" {
+		fmt.Fprintf(MultiLogWriter, "CLUSTER_NODE_NAME environment variable not found")
+		return nil
+	}
+	payload := NodeNameReportDataType{Name: nodeName}
+
+	return SendWebhookEvent("NODE_NAME", payload)
 }
 
 func SendBatch(lines []byte, logFilename string, cancel context.CancelFunc) error {

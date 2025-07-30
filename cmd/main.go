@@ -99,6 +99,11 @@ func main() {
 		return
 	}
 
+	if err := services.ReportNodeName(); err != nil {
+		errOccurred = fmt.Errorf("error reporting node name: %v", err)
+		return
+	}
+
 	checkAndListDebugPath("BEFORE STARTING COMMAND")
 
 	if socketAddress := os.Getenv("interactive_socket"); socketAddress != "" {
