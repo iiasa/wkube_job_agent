@@ -222,9 +222,11 @@ func outputMappingToMountedStorage(source, destination string) error {
 	return inputMappingFromMountedStorage(source, destination)
 }
 
-func processInputMappings(inputMappings []string) ([]func() error, error) {
+func processInputMappings(inputMappings []string) ([]func() error, []func() error, error) {
 
 	var taskQueue []func() error
+
+	var symlinkQueue []func() error
 
 	for _, inputMapping := range inputMappings {
 		inputMapping = strings.TrimSpace(inputMapping)
@@ -235,7 +237,7 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 		inputMappingNew := strings.Replace(inputMapping, "acc://", "__acc__", 1)
 		splittedInputMapping := strings.Split(inputMappingNew, ":")
 		if len(splittedInputMapping) != 2 {
-			return nil, fmt.Errorf("error: invalid input mapping syntax")
+			return nil, nil, fmt.Errorf("error: invalid input mapping syntax")
 		}
 
 		source := splittedInputMapping[0]
@@ -246,18 +248,18 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 			!strings.HasPrefix(source, "/mnt/graph") &&
 			source != "selected_files" &&
 			source != "selected_folders" {
-			return nil, fmt.Errorf("error: invalid source in input mappings")
+			return nil, nil, fmt.Errorf("error: invalid source in input mappings")
 		}
 
 		if source == "selected_folders" {
 			if destination == "" {
-				return nil, fmt.Errorf("error: destination for selected_folders mapping should be defined")
+				return nil, nil, fmt.Errorf("error: destination for selected_folders mapping should be defined")
 			}
 
 			selectedFoldersFromEnv := os.Getenv("selected_foldernames")
 
 			if selectedFoldersFromEnv == "" {
-				return nil, fmt.Errorf("error: selected_folders referenced in source no folder selection detected")
+				return nil, nil, fmt.Errorf("error: selected_folders referenced in source no folder selection detected")
 			} else {
 				selectedFolders := strings.Split(selectedFoldersFromEnv, ",")
 
@@ -271,10 +273,10 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 					}
 				}
 
-				nestedSelectedFolderTaskQueue, err := processInputMappings(newMappings)
+				nestedSelectedFolderTaskQueue, _, err := processInputMappings(newMappings)
 
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				taskQueue = append(taskQueue, nestedSelectedFolderTaskQueue...)
@@ -288,13 +290,13 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 			// if ends with not / and too many files selected -- raise error only one file should be selected
 
 			if destination == "" {
-				return nil, fmt.Errorf("error: destination for selected_files mapping should be defined")
+				return nil, nil, fmt.Errorf("error: destination for selected_files mapping should be defined")
 			}
 
 			selectedFilesFromEnv := os.Getenv("selected_filenames")
 
 			if selectedFilesFromEnv == "" {
-				return nil, fmt.Errorf("error: selected_files referenced in source no file selection detected")
+				return nil, nil, fmt.Errorf("error: selected_files referenced in source no file selection detected")
 			} else {
 				selectedFiles := strings.Split(selectedFilesFromEnv, ",")
 
@@ -313,7 +315,7 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 				} else {
 
 					if len(selectedFiles) > 1 {
-						return nil, fmt.Errorf("error: when destination is file (without '/'), there should only be one selected file")
+						return nil, nil, fmt.Errorf("error: when destination is file (without '/'), there should only be one selected file")
 					} else {
 						if selectedFiles[0] != "" {
 							newMapping := fmt.Sprintf("acc://%s:%s", selectedFiles[0], destination)
@@ -322,10 +324,10 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 					}
 				}
 
-				nestedSelectedfileTaskQueue, err := processInputMappings(newMappings)
+				nestedSelectedfileTaskQueue, _, err := processInputMappings(newMappings)
 
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				taskQueue = append(taskQueue, nestedSelectedfileTaskQueue...)
@@ -339,11 +341,11 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 		}
 
 		if !strings.HasPrefix(destination, "/") {
-			return nil, fmt.Errorf("error: invalid destination path: always use absolute path")
+			return nil, nil, fmt.Errorf("error: invalid destination path: always use absolute path")
 		}
 
 		if strings.HasPrefix(source, "/mnt/pipe") {
-			taskQueue = append(taskQueue, func() error {
+			symlinkQueue = append(taskQueue, func() error {
 				if err := inputMappingFromMountedStorage(source, destination); err != nil {
 					return err
 				}
@@ -366,11 +368,11 @@ func processInputMappings(inputMappings []string) ([]func() error, error) {
 			})
 		}
 	}
-	return taskQueue, nil
+	return taskQueue, symlinkQueue, nil
 }
 
 func preProcessOutputMappings(outputMappings []string) ([]func() error, error) {
-	var taskQueue []func() error
+	var symlinkQueue []func() error
 	// Process output mappings
 	for _, outputMapping := range outputMappings {
 		outputMapping = strings.TrimSpace(outputMapping)
@@ -406,7 +408,7 @@ func preProcessOutputMappings(outputMappings []string) ([]func() error, error) {
 		}
 
 		if strings.HasPrefix(destination, "/mnt/pipe") {
-			taskQueue = append(taskQueue, func() error {
+			symlinkQueue = append(symlinkQueue, func() error {
 				if err := outputMappingToMountedStorage(destination, source); err != nil {
 					return err
 				}
@@ -414,7 +416,7 @@ func preProcessOutputMappings(outputMappings []string) ([]func() error, error) {
 			})
 		}
 	}
-	return taskQueue, nil
+	return symlinkQueue, nil
 }
 
 func postProcessOutputMappings(outputMappings []string) ([]func() error, error) {
@@ -483,19 +485,22 @@ func PreProcessMappings() error {
 	allInputMappings := strings.Split(inputMappings, ";")
 	allOutputMappings := strings.Split(outputMappings, ";")
 
-	taskQueue, err := processInputMappings(allInputMappings)
+	taskQueue, symlinkQueueFromInputMapping, err := processInputMappings(allInputMappings)
 
 	if err != nil {
 		return fmt.Errorf("error: error preparing input mappings %v", err)
 	}
 
-	outputMappingsTaskQueue, err := preProcessOutputMappings(allOutputMappings)
+	symlinkQueueFromOutputMapping, err := preProcessOutputMappings(allOutputMappings)
 
 	if err != nil {
 		return fmt.Errorf("error: error preparing pre processing task queue %v", err)
 	}
 
-	taskQueue = append(taskQueue, outputMappingsTaskQueue...)
+	var finalTaskQueue []func() error
+	finalTaskQueue = append(finalTaskQueue, symlinkQueueFromInputMapping...)
+	finalTaskQueue = append(finalTaskQueue, symlinkQueueFromOutputMapping...)
+	finalTaskQueue = append(finalTaskQueue, taskQueue...)
 
 	errChan := make(chan error, 1)
 
@@ -504,7 +509,7 @@ func PreProcessMappings() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for _, task := range taskQueue {
+		for _, task := range finalTaskQueue {
 			err := task()
 			if err != nil {
 				errChan <- err

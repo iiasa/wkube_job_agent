@@ -36,7 +36,10 @@ func main() {
 	go func() {
 		sig := <-sigChan
 		fmt.Fprintf(services.MultiLogWriter, "Received signal: %s — forwarding to child process\n", sig)
-		cancel() // cancel the context (kill command and stop goroutines)
+		if cmd != nil && cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) // Send to process group
+		}
+		cancel()
 	}()
 
 	defer func() {
@@ -50,8 +53,7 @@ func main() {
 		}
 
 		if err := services.PostProcessMappings(); err != nil {
-			errOccurred = fmt.Errorf("error in post-process-mappings: %v", err)
-			return
+			fmt.Fprintf(services.MultiLogWriter, "error in post-process-mappings: %v", err)
 		}
 
 		if err := services.VerboseResourceReport(); err != nil {
