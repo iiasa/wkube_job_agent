@@ -82,6 +82,7 @@ func Init(ctx context.Context, cancel context.CancelFunc) {
 
 	// Clients
 	HTTPClientWithRetry = &http.Client{
+		Timeout: 90 * time.Second,
 		Transport: &RetryTransport{
 			Base:       transport,
 			MaxRetries: 2,
@@ -90,10 +91,12 @@ func Init(ctx context.Context, cancel context.CancelFunc) {
 	}
 
 	HTTPClient = &http.Client{
+		Timeout:   90 * time.Second,
 		Transport: transport,
 	}
 
 	HTTP2Client = &http.Client{
+		Timeout: 90 * time.Second,
 		Transport: &RetryTransport{
 			Base:       http2Transport,
 			MaxRetries: 2,
