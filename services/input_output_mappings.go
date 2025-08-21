@@ -340,6 +340,12 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 			}
 		}
 
+		if strings.HasSuffix(destination, "/*") {
+			if strings.HasPrefix(source, "__acc__") {
+				destination = strings.TrimSuffix(destination, "/*") + "/" + strings.TrimPrefix(source, "__acc__")
+			}
+		}
+
 		if !strings.HasPrefix(destination, "/") {
 			return nil, nil, fmt.Errorf("error: invalid destination path: always use absolute path")
 		}
