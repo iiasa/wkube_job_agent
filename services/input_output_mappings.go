@@ -486,7 +486,9 @@ func PreProcessMappings() error {
 	fmt.Fprintln(MultiLogWriter, "Pre process input/output mappings started")
 
 	inputMappings := os.Getenv("input_mappings")
+	inputMappings = os.ExpandEnv(inputMappings)
 	outputMappings := os.Getenv("output_mappings")
+	outputMappings = os.ExpandEnv(outputMappings)
 
 	allInputMappings := strings.Split(inputMappings, ";")
 	allOutputMappings := strings.Split(outputMappings, ";")
@@ -544,6 +546,7 @@ func PostProcessMappings() error {
 	fmt.Fprintln(MultiLogWriter, "Post process output mappings started ")
 
 	outputMappings := os.Getenv("output_mappings")
+	outputMappings = os.ExpandEnv(outputMappings)
 
 	allOutputMappings := strings.Split(outputMappings, ";")
 
