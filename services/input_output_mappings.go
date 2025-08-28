@@ -248,7 +248,7 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 			!strings.HasPrefix(source, "/mnt/graph") &&
 			source != "selected_files" &&
 			source != "selected_folders" {
-			return nil, nil, fmt.Errorf("error: invalid source in input mappings")
+			return nil, nil, fmt.Errorf("error: invalid source in input mappings %s:%s", source, destination)
 		}
 
 		if source == "selected_folders" {
