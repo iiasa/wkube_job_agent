@@ -14,6 +14,12 @@ import (
 func startReverseTunnel(localSocket string) error {
 	sshUser := os.Getenv("TUNNEL_GATEWAY_SSH_USER")
 	sshServer := os.Getenv("TUNNEL_GATEWAY_SSH_SERVER")
+	sshPort := os.Getenv("TUNNEL_GATEWAY_SSH_PORT")
+
+	if sshPort == "" {
+		sshPort = "22" // default
+	}
+
 	tunnelGatewayDomain := os.Getenv("TUNNEL_GATEWAY_DOMAIN")
 	sshKeyBase64 := os.Getenv("TUNNEL_GATEWAY_SSH_PRIVATE_KEY_BASE64")
 	podID := os.Getenv("POD_ID")
@@ -52,6 +58,7 @@ func startReverseTunnel(localSocket string) error {
 		"-o", "StrictHostKeyChecking=no", // ⚠️ Replace in production
 		"-o", "ExitOnForwardFailure=yes",
 		"-N", // Don't run remote command
+		"-p", sshPort,
 	)
 
 	if strings.HasPrefix(localSocket, "unix:") {
