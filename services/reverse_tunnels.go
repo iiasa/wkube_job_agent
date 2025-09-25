@@ -1,22 +1,31 @@
 package services
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func startReverseTunnel(localSocket string) error {
 	sshUser := os.Getenv("TUNNEL_GATEWAY_SSH_USER")
 	sshServer := os.Getenv("TUNNEL_GATEWAY_SSH_SERVER")
 	tunnelGatewayDomain := os.Getenv("TUNNEL_GATEWAY_DOMAIN")
-	sshKey := os.Getenv("TUNNEL_GATEWAY_SSH_PRIVATE_KEY")
+	sshKeyBase64 := os.Getenv("TUNNEL_GATEWAY_SSH_PRIVATE_KEY_BASE64")
 	podID := os.Getenv("POD_ID")
 
-	if sshUser == "" || sshServer == "" || sshKey == "" || podID == "" || tunnelGatewayDomain == "" {
+	if sshUser == "" || sshServer == "" || sshKeyBase64 == "" || podID == "" || tunnelGatewayDomain == "" {
 		return fmt.Errorf("missing required environment variables: SSH_USER, SSH_SERVER, SSH_PRIVATE_KEY, POD_ID")
+	}
+
+	// Decode base64 SSH key
+	sshKeyBytes, err := base64.StdEncoding.DecodeString(sshKeyBase64)
+	if err != nil {
+		return fmt.Errorf("failed to decode SSH key: %v", err)
 	}
 
 	// Write SSH key to a secure temp file
@@ -29,11 +38,13 @@ func startReverseTunnel(localSocket string) error {
 		os.Remove(tmpKeyFile.Name())
 	}()
 
-	if err := os.WriteFile(tmpKeyFile.Name(), []byte(sshKey), 0600); err != nil {
+	if err := os.WriteFile(tmpKeyFile.Name(), []byte(sshKeyBytes), 0600); err != nil {
 		return fmt.Errorf("failed to write SSH key to temp file: %v", err)
 	}
 
-	remoteSocketPath := "/tmp/" + podID + ".sock"
+	randomUUID := uuid.New()
+
+	remoteSocketPath := "/tmp/" + randomUUID.String() + ".sock"
 
 	var sshArgs []string
 	sshArgs = append(sshArgs,
@@ -62,7 +73,7 @@ func startReverseTunnel(localSocket string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start SSH reverse tunnel: %v", err)
 	} else {
-		fmt.Fprintf(MultiLogWriter, "Interactive socket tunneled at: %s.%s", podID, tunnelGatewayDomain)
+		fmt.Fprintf(MultiLogWriter, "Interactive socket tunneled at: %s.%s", randomUUID.String(), tunnelGatewayDomain)
 	}
 
 	return nil
