@@ -27,7 +27,7 @@ func getenvWithDefault(key, fallback string) string {
 func CreateRequest(method, endpoint string, body []byte) (*http.Request, error) {
 	gatewayServer := getenvWithDefault(
 		"ACC_JOB_GATEWAY_SERVER",
-		"https://accelerator-api.iiasa.ac.at",
+		"https://accelerator.iiasa.ac.at",
 	)
 
 	authToken := os.Getenv("ACC_JOB_TOKEN")
