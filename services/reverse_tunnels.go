@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -57,6 +58,8 @@ func startReverseTunnel(localSocket string) error {
 		"-i", tmpKeyFile.Name(),
 		"-o", "StrictHostKeyChecking=no", // ⚠️ Replace in production
 		"-o", "ExitOnForwardFailure=yes",
+		"-o", "ServerAliveInterval=10", // 🔸 detect dead tunnel fast
+		"-o", "ServerAliveCountMax=3", // 🔸 after 30s of no response, exit
 		"-N", // Don't run remote command
 		"-p", sshPort,
 	)
@@ -67,7 +70,7 @@ func startReverseTunnel(localSocket string) error {
 		fmt.Fprintf(MultiLogWriter, "Setting up UNIX → UNIX tunnel: %s -> %s \n", remoteSocketPath, unixPath)
 	} else {
 		sshArgs = append(sshArgs, "-R", remoteSocketPath+":"+localSocket)
-		fmt.Fprintf(MultiLogWriter, "Setting up TCP → UNIX tunnel: %s -> %s", remoteSocketPath, localSocket)
+		fmt.Fprintf(MultiLogWriter, "Setting up TCP → UNIX tunnel: %s -> %s \n", remoteSocketPath, localSocket)
 	}
 
 	sshArgs = append(sshArgs, sshUser+"@"+sshServer)
@@ -76,35 +79,56 @@ func startReverseTunnel(localSocket string) error {
 	cmd.Stdout = MultiLogWriter
 	cmd.Stderr = MultiLogWriter
 
-	fmt.Fprintf(MultiLogWriter, "Starting reverse tunnel with command: ssh %s", strings.Join(sshArgs, " "))
+	fmt.Fprintf(MultiLogWriter, "Starting reverse tunnel with command: ssh %s \n", strings.Join(sshArgs, " "))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start SSH reverse tunnel: %v", err)
 	} else {
-		fmt.Fprintf(MultiLogWriter, "Interactive socket tunneled at: %s.%s", randomUUID.String(), tunnelGatewayDomain)
+		fmt.Fprintf(MultiLogWriter, "Interactive socket tunneled at: %s.%s \n", randomUUID.String(), tunnelGatewayDomain)
 	}
 
 	return nil
 }
 
-func StartTunnelWithRestart(localSocket string) error {
-	errCh := make(chan error, 1)
+func StartTunnelWithRestart(ctx context.Context, localSocket string, errCh chan<- error) {
+	const (
+		retryDelay        = 5 * time.Second
+		gracePeriod       = 30 * time.Second
+		maxConsecutiveErr = 5
+	)
+
 	go func() {
+		consecutiveFails := 0
+		var firstFailAt time.Time
+
 		for {
-			fmt.Fprintln(MultiLogWriter, "Starting reverse tunnel...")
-			err := startReverseTunnel(localSocket) // return proper error to capture error..refer other implementation
-			if err != nil {
+			select {
+			case <-ctx.Done():
+				fmt.Fprintln(MultiLogWriter, "Tunnel goroutine exiting due to context cancellation")
+				return
+			default:
+				err := startReverseTunnel(localSocket)
+				if err != nil {
+					fmt.Fprintf(MultiLogWriter, "Tunnel process exited with error: %v\n", err)
+					consecutiveFails++
 
-				errCh <- fmt.Errorf("tunnel exited with error: %v", err)
-				return // exit goroutine
-			} else {
+					if consecutiveFails == 1 {
+						firstFailAt = time.Now()
+					}
 
-				fmt.Fprintln(MultiLogWriter, "Tunnel exited normally")
+					// Check if grace period or max retries exceeded
+					if time.Since(firstFailAt) > gracePeriod || consecutiveFails >= maxConsecutiveErr {
+						errCh <- fmt.Errorf("tunnel failed %d times over %s — giving up", consecutiveFails, time.Since(firstFailAt))
+						return
+					}
+
+					fmt.Fprintf(MultiLogWriter, "Retrying tunnel in %s (%d/%d)\n", retryDelay, consecutiveFails, maxConsecutiveErr)
+					time.Sleep(retryDelay)
+					continue
+				}
+
+				// Reset on success
+				consecutiveFails = 0
 			}
-
-			// Optional: add backoff delay before retry
-			time.Sleep(5 * time.Second)
 		}
 	}()
-
-	return <-errCh
 }

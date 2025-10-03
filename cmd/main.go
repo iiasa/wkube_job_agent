@@ -109,9 +109,17 @@ func main() {
 	checkAndListDebugPath("BEFORE STARTING COMMAND")
 
 	if socketAddress := os.Getenv("interactive_socket"); socketAddress != "" {
-		err := services.StartTunnelWithRestart(socketAddress)
-		errOccurred = fmt.Errorf("error setting up interactive tunnel: %v", err)
-		return
+		tunnelErrCh := make(chan error, 1)
+		services.StartTunnelWithRestart(ctx, socketAddress, tunnelErrCh)
+
+		go func() {
+			select {
+			case err := <-tunnelErrCh:
+				fmt.Fprintf(services.MultiLogWriter, "❌ Tunnel broke: %v — shutting down job\n", err)
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
 	}
 
 	if err := abortIfCancelled(ctx, "tunnel setup"); err != nil {
