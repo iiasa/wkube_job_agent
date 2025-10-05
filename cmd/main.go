@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"runtime/debug"
 	"syscall"
 
@@ -43,14 +42,6 @@ func main() {
 	}()
 
 	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(services.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
-		} else if errOccurred != nil {
-			if err := services.UpdateJobStatus("ERROR"); err != nil {
-				fmt.Fprintf(services.MultiLogWriter, "Error updating status to ERROR: %v \n", err)
-			}
-			fmt.Fprintf(services.MultiLogWriter, "Error: %v \n", errOccurred)
-		}
 
 		if err := services.PostProcessMappings(); err != nil {
 			fmt.Fprintf(services.MultiLogWriter, "error in post-process-mappings: %v", err)
@@ -62,6 +53,22 @@ func main() {
 
 		if err := services.UploadFile("/tmp/job.log", services.LogFileName); err != nil {
 			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v", err)
+
+		}
+
+		if r := recover(); r != nil {
+			fmt.Fprintf(services.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
+		} else if errOccurred != nil {
+			if err := services.UpdateJobStatus("ERROR"); err != nil {
+				fmt.Fprintf(services.MultiLogWriter, "Error updating status to ERROR: %v \n", err)
+			}
+			fmt.Fprintf(services.MultiLogWriter, "Error: %v \n", errOccurred)
+		} else {
+
+			if err := services.UpdateJobStatus("DONE"); err != nil {
+				fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v", err)
+
+			}
 
 		}
 
@@ -106,8 +113,6 @@ func main() {
 		return
 	}
 
-	checkAndListDebugPath("BEFORE STARTING COMMAND")
-
 	if socketAddress := os.Getenv("interactive_socket"); socketAddress != "" {
 		tunnelErrCh := make(chan error, 1)
 		services.StartTunnelWithRestart(ctx, socketAddress, tunnelErrCh)
@@ -149,70 +154,4 @@ func main() {
 		return
 	}
 
-	checkAndListDebugPath("AFTER COMMAND FINISHED")
-
-	if err := services.UpdateJobStatus("DONE"); err != nil {
-		errOccurred = fmt.Errorf("error updating status to DONE: %v", err)
-		return
-	}
-}
-
-func checkAndListDebugPath(context string) {
-	debugPath := os.Getenv("DEBUG_WKUBE_MAPPING_PATH")
-	if debugPath == "" {
-		return
-	}
-
-	fmt.Fprintf(services.MultiLogWriter, "DEBUG_WKUBE_MAPPING_PATH is set — listing %q (%s):\n", debugPath, context)
-
-	info, err := os.Stat(debugPath)
-	if os.IsNotExist(err) {
-		fmt.Fprintf(services.MultiLogWriter, "%q does not exist\n", debugPath)
-		return
-	} else if err != nil {
-		fmt.Fprintf(services.MultiLogWriter, "Error checking %q: %v\n", debugPath, err)
-		return
-	} else if !info.IsDir() {
-		fmt.Fprintf(services.MultiLogWriter, "%q exists but is not a directory\n", debugPath)
-		return
-	}
-
-	err = filepath.Walk(debugPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "Error accessing %q: %v\n", path, err)
-			return err
-		}
-
-		// Use Lstat to detect symlink
-		lstatInfo, lerr := os.Lstat(path)
-		if lerr != nil {
-			fmt.Fprintf(services.MultiLogWriter, "Error lstat %q: %v\n", path, lerr)
-			return lerr
-		}
-
-		mode := lstatInfo.Mode()
-
-		switch {
-		case mode&os.ModeSymlink != 0:
-			// It's a symlink — print target
-			target, terr := os.Readlink(path)
-			if terr != nil {
-				fmt.Fprintf(services.MultiLogWriter, "[LINK] %s -> (error reading link target: %v)\n", path, terr)
-			} else {
-				fmt.Fprintf(services.MultiLogWriter, "[LINK] %s -> %s\n", path, target)
-			}
-		case mode.IsDir():
-			fmt.Fprintf(services.MultiLogWriter, "[DIR ] %s\n", path)
-		case mode.IsRegular():
-			fmt.Fprintf(services.MultiLogWriter, "[FILE] %s\n", path)
-		default:
-			fmt.Fprintf(services.MultiLogWriter, "[OTHER] %s (mode: %v)\n", path, mode)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		fmt.Fprintf(services.MultiLogWriter, "Error walking %q: %v\n", debugPath, err)
-	}
 }

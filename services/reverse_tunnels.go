@@ -22,6 +22,7 @@ func startReverseTunnel(localSocket string) error {
 	}
 
 	tunnelGatewayDomain := os.Getenv("TUNNEL_GATEWAY_DOMAIN")
+	tunnelGatewayPort := getenvWithDefault("TUNNEL_GATEWAY_PORT", "")
 	sshKeyBase64 := os.Getenv("TUNNEL_GATEWAY_SSH_PRIVATE_KEY_BASE64")
 	podID := os.Getenv("POD_ID")
 
@@ -67,10 +68,10 @@ func startReverseTunnel(localSocket string) error {
 	if strings.HasPrefix(localSocket, "unix:") {
 		unixPath := strings.TrimPrefix(localSocket, "unix:")
 		sshArgs = append(sshArgs, "-R", remoteSocketPath+":"+unixPath)
-		fmt.Fprintf(MultiLogWriter, "Setting up UNIX → UNIX tunnel: %s -> %s \n", remoteSocketPath, unixPath)
+		fmt.Fprintf(MultiLogWriter, "Setting up UNIX → UNIX tunnel: %s -> %s \n", unixPath, remoteSocketPath)
 	} else {
 		sshArgs = append(sshArgs, "-R", remoteSocketPath+":"+localSocket)
-		fmt.Fprintf(MultiLogWriter, "Setting up TCP → UNIX tunnel: %s -> %s \n", remoteSocketPath, localSocket)
+		fmt.Fprintf(MultiLogWriter, "Setting up TCP → UNIX tunnel: %s -> %s \n", localSocket, remoteSocketPath)
 	}
 
 	sshArgs = append(sshArgs, sshUser+"@"+sshServer)
@@ -79,7 +80,8 @@ func startReverseTunnel(localSocket string) error {
 	cmd.Stdout = MultiLogWriter
 	cmd.Stderr = MultiLogWriter
 
-	fmt.Fprintf(MultiLogWriter, "Starting reverse tunnel with command: ssh %s \n", strings.Join(sshArgs, " "))
+	// fmt.Fprintf(MultiLogWriter, "Starting reverse tunnel with command: ssh %s \n", strings.Join(sshArgs, " "))
+	fmt.Fprintf(MultiLogWriter, "Starting tunnel at 🔗  %s.%s%s \n", randomUUID.String(), tunnelGatewayDomain, tunnelGatewayPort)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start SSH reverse tunnel: %v", err)
 	} else {
