@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/iiasa/wkube-job-agent/services"
 )
@@ -67,9 +68,7 @@ func main() {
 
 			if err := services.UpdateJobStatus("DONE"); err != nil {
 				fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v", err)
-
 			}
-
 		}
 
 		services.RemoteLogSink.FinalFlush()
@@ -84,6 +83,19 @@ func main() {
 	// cmd = exec.Command("/bin/sh", "-c", command)
 	cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	go func() {
+		<-ctx.Done()
+		if cmd != nil && cmd.Process != nil {
+			pgid := -cmd.Process.Pid
+			fmt.Printf("Context cancelled — killing process group %d\n", -pgid)
+			syscall.Kill(pgid, syscall.SIGTERM)
+			time.AfterFunc(10*time.Second, func() {
+				syscall.Kill(pgid, syscall.SIGKILL)
+			})
+		}
+	}()
+
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	cmd.Stdout = services.MultiLogWriter
 	cmd.Stderr = services.MultiLogWriter
