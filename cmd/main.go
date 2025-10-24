@@ -153,10 +153,9 @@ func main() {
 	// Wait for command to complete
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			fmt.Fprintf(services.MultiLogWriter, "Command interrupted due to context cancellation: %v\n", ctx.Err())
+			errOccurred = fmt.Errorf("Command interrupted due to context cancellation: %v\n", ctx.Err())
 			return
 		}
-
 		errOccurred = fmt.Errorf("command execution error: %v", err)
 		return
 	}

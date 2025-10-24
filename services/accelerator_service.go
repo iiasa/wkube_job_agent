@@ -437,8 +437,10 @@ func getFileURLFromRepo(filename string) (string, error) {
 	// Extract the project slug from the filename
 	projectSlug := strings.Split(filename, "/")[0]
 
+	encodedFilename := url.QueryEscape(filename)
+
 	// Construct the endpoint
-	endpoint := fmt.Sprintf("/%s/get-file-download-url/?filename=%s", projectSlug, filename)
+	endpoint := fmt.Sprintf("/%s/get-file-download-url/?filename=%s", projectSlug, encodedFilename)
 
 	// Create the HTTP request
 	req, err := CreateRequest("GET", endpoint, nil)
