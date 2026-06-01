@@ -535,8 +535,6 @@ type UpdateStatusEventPostData struct {
 
 type SignedURLResponse struct {
 	UploadURL   string `json:"upload_url"`
-	Filename    string `json:"filename"`
-	AppBucketId int    `json:"app_bucket_id"`
 	IsHealthy   bool   `json:"is_healthy"`
 }
 
@@ -634,34 +632,6 @@ func SendBatch(lines []byte, logFilename string, cancel context.CancelFunc) erro
 	if putResp.StatusCode != http.StatusOK {
 		err := HandleHTTPError(putResp)
 		return fmt.Errorf("PUT %s returned not okay status %v", signedURLResponse.UploadURL, err)
-	}
-
-	// Register log file
-	postData := map[string]interface{}{
-		"filename":      signedURLResponse.Filename,
-		"app_bucket_id": signedURLResponse.AppBucketId,
-	}
-	postDataBytes, err := json.Marshal(postData)
-	if err != nil {
-		return fmt.Errorf("error encoding post data: %v", err)
-	}
-
-	registerEndpoint := "/register-log-file/"
-
-	postReq, err := CreateRequest("POST", registerEndpoint, postDataBytes)
-	if err != nil {
-		return err
-	}
-
-	postResp, err := HTTPClientWithRetry.Do(postReq)
-	if err != nil {
-		return fmt.Errorf("error sending POST request to register chunk: %v", err)
-	}
-	defer postResp.Body.Close()
-
-	if postResp.StatusCode != http.StatusOK {
-		err := HandleHTTPError(postResp)
-		return fmt.Errorf("POST %s returned not okay status %v", registerEndpoint, err)
 	}
 
 	if !signedURLResponse.IsHealthy {

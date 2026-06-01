@@ -100,7 +100,7 @@ DrainLoop:
 	}
 
 	counterMu.Lock()
-	logFilename := fmt.Sprintf("wkube%d", logCounter)
+	logFilename := fmt.Sprintf("wkube%08d", logCounter)
 	logCounter++
 	counterMu.Unlock()
 
