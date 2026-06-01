@@ -1,0 +1,189 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+)
+
+const HfXetHelperScript = `import sys
+import json
+import urllib.request
+import urllib.error
+import hashlib
+
+def compute_sha256(filepath):
+    h = hashlib.sha256()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+def do_download(endpoint, cas_token, expires_at, files_json):
+    import hf_xet
+    files_list = json.loads(files_json)
+    download_infos = []
+    for f in files_list:
+        download_infos.append(
+            hf_xet.PyXetDownloadInfo(
+                destination_path=f["destination_path"],
+                hash=f["hash"],
+                file_size=f["file_size"]
+            )
+        )
+    
+    def refresher():
+        return cas_token, expires_at
+
+    hf_xet.download_files(
+        files=download_infos,
+        endpoint=endpoint,
+        token_info=(cas_token, expires_at),
+        token_refresher=refresher,
+        progress_updater=None,
+        request_headers=None
+    )
+    print("DOWNLOAD_SUCCESS")
+
+def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files_json):
+    import hf_xet
+    files_list = json.loads(files_json)
+    local_paths = [f["local_path"] for f in files_list]
+    
+    def refresher():
+        return cas_token, expires_at
+
+    upload_results = hf_xet.upload_files(
+        file_paths=local_paths,
+        endpoint=endpoint,
+        token_info=(cas_token, expires_at),
+        token_refresher=refresher,
+        progress_updater=None,
+        _repo_type=None,
+        request_headers=None,
+        sha256s=None,
+        skip_sha256=False
+    )
+    
+    registration_items = []
+    for f, upload_info in zip(files_list, upload_results):
+        sha256_hash = compute_sha256(f["local_path"])
+        registration_items.append({
+            "filename": f"{project_slug}/{f['remote_path']}",
+            "merkle_hash": upload_info.hash,
+            "sha256": sha256_hash,
+            "file_size": upload_info.file_size,
+            "content_type": "application/octet-stream"
+        })
+    
+    payload = json.dumps({"items": registration_items}).encode("utf-8")
+    req = urllib.request.Request(
+        register_url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "X-Project-Slug": project_slug,
+            "Authorization": f"Bearer {cas_token}"
+        },
+        method="POST"
+    )
+    
+    try:
+        with urllib.request.urlopen(req) as resp:
+            body = resp.read().decode("utf-8")
+            print(f"REGISTER_SUCCESS: {body}")
+    except urllib.error.HTTPError as e:
+        print(f"REGISTER_FAILED: {e.code} - {e.read().decode('utf-8')}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"REGISTER_FAILED: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: hf_xet_helper.py [download|upload] ...", file=sys.stderr)
+        sys.exit(1)
+        
+    cmd = sys.argv[1]
+    if cmd == "download":
+        endpoint = sys.argv[2]
+        cas_token = sys.argv[3]
+        expires_at = int(sys.argv[4])
+        files_json = sys.argv[5]
+        do_download(endpoint, cas_token, expires_at, files_json)
+    elif cmd == "upload":
+        project_slug = sys.argv[2]
+        endpoint = sys.argv[3]
+        cas_token = sys.argv[4]
+        expires_at = int(sys.argv[5])
+        register_url = sys.argv[6]
+        files_json = sys.argv[7]
+        do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files_json)
+    else:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+`
+
+const RuntimeDir = "/mnt/agent/xet_python"
+const LocalDevDir = "/agent/xet_python"
+
+// WriteHelperScript writes the helper python script to the temporary execution directory.
+func WriteHelperScript() error {
+	destDir := "/mnt/agent"
+	if _, err := os.Stat(destDir); os.IsNotExist(err) {
+		destDir = "/agent" // Local dev fallback
+	}
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create runtime dir: %w", err)
+	}
+	destPath := filepath.Join(destDir, "hf_xet_helper.py")
+	return os.WriteFile(destPath, []byte(HfXetHelperScript), 0644)
+}
+
+// GetPythonInterpreter resolves the best python interpreter path pre-built in the container.
+func GetPythonInterpreter() (string, error) {
+	// 1. Check in the Kubernetes mounted agent shared volume
+	targetPython := filepath.Join(RuntimeDir, "bin", "python3")
+	if _, err := os.Stat(targetPython); err == nil {
+		return targetPython, nil
+	}
+
+	// 2. Check in local development /agent folder fallback
+	devPython := filepath.Join(LocalDevDir, "bin", "python3")
+	if _, err := os.Stat(devPython); err == nil {
+		return devPython, nil
+	}
+
+	return "", fmt.Errorf("pre-packaged standalone Python environment with hf_xet not found under %s or %s", RuntimeDir, LocalDevDir)
+}
+
+
+// RunHelperCommand executes the hf_xet helper python subcommand.
+func RunHelperCommand(ctx context.Context, args []string) error {
+	if err := WriteHelperScript(); err != nil {
+		return err
+	}
+
+	pythonBin, err := GetPythonInterpreter()
+	if err != nil {
+		return err
+	}
+
+	destDir := "/mnt/agent"
+	if _, err := os.Stat(destDir); os.IsNotExist(err) {
+		destDir = "/agent" // Local dev fallback
+	}
+	scriptPath := filepath.Join(destDir, "hf_xet_helper.py")
+	fullArgs := append([]string{scriptPath}, args...)
+
+	cmd := exec.CommandContext(ctx, pythonBin, fullArgs...)
+	cmd.Stdout = MultiLogWriter
+	cmd.Stderr = MultiLogWriter
+
+	return cmd.Run()
+}

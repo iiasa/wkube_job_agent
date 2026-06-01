@@ -1,18 +1,74 @@
 package services
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
+
+type downloadFileInfo struct {
+	DestinationPath string `json:"destination_path"`
+	Hash            string `json:"hash"`
+	FileSize        int64  `json:"file_size"`
+}
+
+type FileStat struct {
+	ObjectName string `json:"object_name"`
+	Size       int64  `json:"size"`
+	MerkleHash string `json:"merkle_hash"`
+}
+
+func getFileStat(filename string) (*FileStat, error) {
+	projectSlug := strings.Split(filename, "/")[0]
+	endpoint := fmt.Sprintf("/%s/file-stat/", projectSlug)
+
+	payload := map[string]string{
+		"filename": filename,
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := CreateRequest("POST", endpoint, bodyBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := HTTPClientWithRetry.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		err := HandleHTTPError(resp)
+		return nil, fmt.Errorf("POST %s returned not okay status %v", endpoint, err)
+	}
+
+	var result FileStat
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
 
 func remoteCopy(source, destination string) error {
 	files, err := EnumerateFilesByPrefix(source)
 	if err != nil {
 		return fmt.Errorf("error enumerating files- %v", err)
+	}
+
+	if len(files) == 0 {
+		return nil
 	}
 
 	if len(files) > 1 && !strings.HasSuffix(destination, "/") {
@@ -21,31 +77,58 @@ func remoteCopy(source, destination string) error {
 			source, destination)
 	}
 
+	var downloadList []downloadFileInfo
+
 	for _, file := range files {
-
 		var destinationFile string
-
 		if strings.HasSuffix(destination, "/") {
-			// Construct the destination file path
 			relPath := strings.TrimPrefix(file, source)
-
 			relPath = strings.TrimPrefix(relPath, "/")
-
 			destinationFile = filepath.Join(destination, relPath)
 		} else {
 			destinationFile = destination
 		}
 
-		// Ensure the destination directory exists
 		if err := os.MkdirAll(filepath.Dir(destinationFile), os.ModePerm); err != nil {
 			return fmt.Errorf("error creating directory: %v", err)
 		}
 
-		// Download the file
-		fmt.Fprintf(MultiLogWriter, "Downloading file: %s\n", file)
-		if err := DownloadFileFromRepo(file, destinationFile); err != nil {
-			return fmt.Errorf("error downloading file: %v", err)
+		stat, err := getFileStat(file)
+		if err != nil {
+			return fmt.Errorf("error getting stat for %s: %v", file, err)
 		}
+
+		downloadList = append(downloadList, downloadFileInfo{
+			DestinationPath: destinationFile,
+			Hash:            stat.MerkleHash,
+			FileSize:        stat.Size,
+		})
+	}
+
+	filesJSON, err := json.Marshal(downloadList)
+	if err != nil {
+		return err
+	}
+
+	projectSlug := strings.Split(files[0], "/")[0]
+	gatewayServer := getenvWithDefault("ACC_JOB_GATEWAY_SERVER", "https://accelerator.iiasa.ac.at")
+	casEndpoint := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas"
+	authToken := os.Getenv("ACC_JOB_TOKEN")
+	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, authToken)
+	expiresAt := time.Now().Add(12 * time.Hour).Unix()
+
+	args := []string{
+		"download",
+		casEndpoint,
+		casToken,
+		fmt.Sprintf("%d", expiresAt),
+		string(filesJSON),
+	}
+
+	fmt.Fprintf(MultiLogWriter, "Downloading %d files via hf_xet...\n", len(downloadList))
+	ctx := context.Background()
+	if err := RunHelperCommand(ctx, args); err != nil {
+		return fmt.Errorf("hf_xet download failed: %w", err)
 	}
 
 	return nil
@@ -111,8 +194,12 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return nil
 }
 
-func remotePush(source, destination string) error {
+type uploadFileInfo struct {
+	LocalPath  string `json:"local_path"`
+	RemotePath string `json:"remote_path"`
+}
 
+func remotePush(source, destination string) error {
 	destination = strings.TrimRight(destination, string(os.PathSeparator))
 
 	info, err := os.Stat(source)
@@ -120,39 +207,73 @@ func remotePush(source, destination string) error {
 		return err
 	}
 
+	var uploadList []uploadFileInfo
+
 	if !info.IsDir() {
-		if err := UploadFile(source, destination); err != nil {
+		uploadList = append(uploadList, uploadFileInfo{
+			LocalPath:  source,
+			RemotePath: destination,
+		})
+	} else {
+		err = filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			relPath, err := filepath.Rel(source, path)
+			if err != nil {
+				return err
+			}
+
+			destPath := filepath.Join(destination, relPath)
+			uploadList = append(uploadList, uploadFileInfo{
+				LocalPath:  path,
+				RemotePath: destPath,
+			})
+			return nil
+		})
+		if err != nil {
 			return err
 		}
+	}
+
+	if len(uploadList) == 0 {
 		return nil
 	}
 
-	return filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
+	filesJSON, err := json.Marshal(uploadList)
+	if err != nil {
+		return err
+	}
 
-		relPath, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
+	projectSlug := strings.Split(uploadList[0].RemotePath, "/")[0]
+	gatewayServer := getenvWithDefault("ACC_JOB_GATEWAY_SERVER", "https://accelerator.iiasa.ac.at")
+	casEndpoint := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas"
+	authToken := os.Getenv("ACC_JOB_TOKEN")
+	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, authToken)
+	expiresAt := time.Now().Add(12 * time.Hour).Unix()
+	registerUrl := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas/v1/cas/bulk-register"
 
-		// Join paths safely, ensuring no double slashes
-		destPath := filepath.Join(destination, relPath)
+	args := []string{
+		"upload",
+		projectSlug,
+		casEndpoint,
+		casToken,
+		fmt.Sprintf("%d", expiresAt),
+		registerUrl,
+		string(filesJSON),
+	}
 
-		if err := UploadFile(path, destPath); err != nil {
-			return err
-		}
-		return nil
-	})
+	fmt.Fprintf(MultiLogWriter, "Uploading %d files via hf_xet...\n", len(uploadList))
+	ctx := context.Background()
+	if err := RunHelperCommand(ctx, args); err != nil {
+		return fmt.Errorf("hf_xet upload failed: %w", err)
+	}
 
-	// if err := UploadFile(source, destination); err != nil {
-	// 	return err
-	// }
-	// return nil
+	return nil
 }
 
 func inputMappingFromMountedStorage(source, destination string) error {
