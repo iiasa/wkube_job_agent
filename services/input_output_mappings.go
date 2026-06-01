@@ -113,9 +113,11 @@ func remoteCopy(source, destination string) error {
 	projectSlug := strings.Split(files[0], "/")[0]
 	gatewayServer := getenvWithDefault("ACC_JOB_GATEWAY_SERVER", "https://accelerator.iiasa.ac.at")
 	casEndpoint := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas"
-	authToken := os.Getenv("ACC_JOB_TOKEN")
-	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, authToken)
-	expiresAt := time.Now().Add(12 * time.Hour).Unix()
+	accessToken, expiresAt, err := GetAccessToken()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve access token: %w", err)
+	}
+	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, accessToken)
 
 	args := []string{
 		"download",
@@ -252,9 +254,11 @@ func remotePush(source, destination string) error {
 	projectSlug := strings.Split(uploadList[0].RemotePath, "/")[0]
 	gatewayServer := getenvWithDefault("ACC_JOB_GATEWAY_SERVER", "https://accelerator.iiasa.ac.at")
 	casEndpoint := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas"
-	authToken := os.Getenv("ACC_JOB_TOKEN")
-	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, authToken)
-	expiresAt := time.Now().Add(12 * time.Hour).Unix()
+	accessToken, expiresAt, err := GetAccessToken()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve access token: %w", err)
+	}
+	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, accessToken)
 	registerUrl := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas/v1/cas/bulk-register"
 
 	args := []string{

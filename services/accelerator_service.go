@@ -15,7 +15,90 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+var (
+	tokenMutex          sync.Mutex
+	currentRefreshToken string
+	cachedAccessToken   string
+	cachedExpiresAt     time.Time
+)
+
+// GetAccessToken retrieves a valid access token. If no valid access token is cached,
+// it exchanges ACC_JOB_API_REFRESH_TOKEN (with token rotation) and caches it.
+func GetAccessToken() (string, int64, error) {
+	tokenMutex.Lock()
+	defer tokenMutex.Unlock()
+
+	now := time.Now()
+	// Reuse cached access token if it has at least 5 minutes remaining
+	if cachedAccessToken != "" && now.Before(cachedExpiresAt.Add(-5*time.Minute)) {
+		return cachedAccessToken, cachedExpiresAt.Unix(), nil
+	}
+
+	if currentRefreshToken == "" {
+		currentRefreshToken = os.Getenv("ACC_JOB_API_REFRESH_TOKEN")
+	}
+
+	if currentRefreshToken == "" {
+		return "", 0, fmt.Errorf("ACC_JOB_API_REFRESH_TOKEN environment variable is not set")
+	}
+
+	gatewayServer := getenvWithDefault(
+		"ACC_JOB_GATEWAY_SERVER",
+		"https://accelerator.iiasa.ac.at",
+	)
+	refreshURL := fmt.Sprintf("%s/api/v1/oauth/device/access-token/", strings.TrimRight(gatewayServer, "/"))
+
+	type RefreshPayload struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	type RefreshResponse struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+
+	payloadBytes, err := json.Marshal(RefreshPayload{RefreshToken: currentRefreshToken})
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to marshal refresh payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", refreshURL, bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to create refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Use HTTPClientWithRetry since it handles connection errors/retries and is defined in config.go
+	resp, err := HTTPClientWithRetry.Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to send refresh token request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		return "", 0, fmt.Errorf("refresh token request returned status %d: %s", resp.StatusCode, string(errBody))
+	}
+
+	var respData RefreshResponse
+	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
+		return "", 0, fmt.Errorf("failed to decode refresh response: %w", err)
+	}
+
+	if respData.AccessToken == "" {
+		return "", 0, fmt.Errorf("refresh response did not contain access token")
+	}
+
+	// Update the refresh token for the next rotation
+	currentRefreshToken = respData.RefreshToken
+	cachedAccessToken = respData.AccessToken
+	// Assume 1 hour access token lifetime, expire slightly earlier (50 minutes)
+	cachedExpiresAt = now.Add(50 * time.Minute)
+
+	return cachedAccessToken, cachedExpiresAt.Unix(), nil
+}
 
 func getenvWithDefault(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
@@ -30,14 +113,13 @@ func CreateRequest(method, endpoint string, body []byte) (*http.Request, error) 
 		"https://accelerator.iiasa.ac.at",
 	)
 
-	authToken := os.Getenv("ACC_JOB_TOKEN")
-	if authToken == "" {
-		return nil, fmt.Errorf("AUTH_TOKEN environment variable not set")
+	authToken, _, err := GetAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve access token: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/v1/ajob-cli%s", gatewayServer, endpoint)
 	var req *http.Request
-	var err error
 
 	if body != nil {
 		req, err = http.NewRequest(method, url, bytes.NewBuffer(body))
