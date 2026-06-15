@@ -783,3 +783,41 @@ func CheckHealth(cancel context.CancelFunc) error {
 
 	return nil
 }
+
+type RegisterValidationPayload struct {
+	ValidatedFilename             string          `json:"validated_filename"`
+	DatasetTemplateID             int             `json:"dataset_template_id"`
+	ValidatedMetadata             json.RawMessage `json:"validated_metadata"`
+	ValidationSupportingFilenames []string        `json:"validation_supporting_filenames"`
+}
+
+func RegisterValidationWithFilename(payload *RegisterValidationPayload) (bool, error) {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	httpReq, err := CreateRequest("PUT", "/register-validation-with-filename/", payloadBytes)
+	if err != nil {
+		return false, fmt.Errorf("failed to create gateway request: %w", err)
+	}
+
+	resp, err := HTTPClientWithRetry.Do(httpReq)
+	if err != nil {
+		return false, fmt.Errorf("gateway request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBytes, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("gateway returned status %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	var result bool
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("failed to decode gateway response: %w", err)
+	}
+
+	return result, nil
+}
+

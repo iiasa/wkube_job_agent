@@ -26,6 +26,8 @@ func main() {
 	defer cancel()
 	services.Init(ctx, cancel)
 
+	go services.StartIPCServer(ctx)
+
 	var errOccurred error
 	var cmd *exec.Cmd
 
