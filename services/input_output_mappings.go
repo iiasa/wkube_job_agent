@@ -713,3 +713,99 @@ func PostProcessMappings() error {
 
 	return nil
 }
+
+func GetProjectSlug() string {
+	// 1. Try environment variable PROJECT_SLUG
+	if slug := os.Getenv("PROJECT_SLUG"); slug != "" {
+		return slug
+	}
+	// 2. Try environment variable project_slug
+	if slug := os.Getenv("project_slug"); slug != "" {
+		return slug
+	}
+	// 3. Try environment variable ACC_PROJECT_SLUG
+	if slug := os.Getenv("ACC_PROJECT_SLUG"); slug != "" {
+		return slug
+	}
+
+	return ""
+}
+
+func RemotePushLog(source, destination, projectSlug string) error {
+	destination = strings.TrimRight(destination, string(os.PathSeparator))
+
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+
+	var uploadList []uploadFileInfo
+
+	if !info.IsDir() {
+		uploadList = append(uploadList, uploadFileInfo{
+			LocalPath:  source,
+			RemotePath: destination,
+		})
+	} else {
+		err = filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			relPath, err := filepath.Rel(source, path)
+			if err != nil {
+				return err
+			}
+
+			destPath := filepath.Join(destination, relPath)
+			uploadList = append(uploadList, uploadFileInfo{
+				LocalPath:  path,
+				RemotePath: destPath,
+			})
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(uploadList) == 0 {
+		return nil
+	}
+
+	filesJSON, err := json.Marshal(uploadList)
+	if err != nil {
+		return err
+	}
+
+	gatewayServer := getenvWithDefault("ACC_JOB_GATEWAY_SERVER", "https://accelerator.iiasa.ac.at")
+	casEndpoint := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas"
+	accessToken, expiresAt, err := GetAccessToken()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve access token: %w", err)
+	}
+	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, accessToken)
+	registerUrl := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas/v1/cas/bulk-register"
+
+	args := []string{
+		"upload",
+		projectSlug,
+		casEndpoint,
+		casToken,
+		fmt.Sprintf("%d", expiresAt),
+		registerUrl,
+		string(filesJSON),
+	}
+
+	fmt.Fprintf(MultiLogWriter, "Uploading %d log files via hf_xet...\n", len(uploadList))
+	ctx := context.Background()
+	if err := RunHelperCommand(ctx, args); err != nil {
+		return fmt.Errorf("hf_xet log upload failed: %w", err)
+	}
+
+	return nil
+}
+

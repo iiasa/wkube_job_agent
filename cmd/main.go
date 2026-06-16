@@ -54,9 +54,16 @@ func main() {
 			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
 
-		if err := services.UploadFile("/tmp/job.log", services.LogFileName); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v", err)
-
+		projectSlug := services.GetProjectSlug()
+		if projectSlug != "" {
+			if err := services.RemotePushLog("/tmp/job.log", services.LogFileName, projectSlug); err != nil {
+				fmt.Fprintf(services.MultiLogWriter, "error uploading job log via xet: %v\n", err)
+			}
+		} else {
+			fmt.Fprintln(services.MultiLogWriter, "warning: project slug not found, attempting standard upload")
+			if err := services.UploadFile("/tmp/job.log", services.LogFileName); err != nil {
+				fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v\n", err)
+			}
 		}
 
 		if r := recover(); r != nil {

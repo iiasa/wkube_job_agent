@@ -52,6 +52,26 @@ func handleConnection(conn net.Conn) {
 
 		sendSuccess(conn, result)
 
+	case "get-access-token":
+		accessToken, expiresAt, err := GetAccessToken()
+		if err != nil {
+			sendError(conn, fmt.Sprintf("failed to get token: %v", err))
+			return
+		}
+
+		type TokenResponse struct {
+			Status      string `json:"status"`
+			AccessToken string `json:"access_token"`
+			ExpiresAt   int64  `json:"expires_at"`
+		}
+		resp := TokenResponse{
+			Status:      "success",
+			AccessToken: accessToken,
+			ExpiresAt:   expiresAt,
+		}
+		respBytes, _ := json.Marshal(resp)
+		_, _ = conn.Write(respBytes)
+
 	default:
 		sendError(conn, fmt.Sprintf("unsupported action: %s", req.Action))
 	}

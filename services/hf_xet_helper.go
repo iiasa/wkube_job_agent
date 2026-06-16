@@ -13,6 +13,50 @@ import json
 import urllib.request
 import urllib.error
 import hashlib
+import time
+import os
+
+class TokenRefresher:
+    def __init__(self, cas_token, expires_at):
+        self.cas_token = cas_token
+        self.expires_at = expires_at
+        try:
+            self.project_slug = cas_token.split("xet_session_prj_")[1].split("_")[0]
+        except Exception:
+            self.project_slug = ""
+
+    def refresh(self):
+        import time
+        import sys
+        import socket
+        import json
+
+        # Refresh if token has less than 5 minutes (300 seconds) remaining
+        if time.time() < self.expires_at - 300:
+            return self.cas_token, self.expires_at
+
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect("/tmp/wagt.sock")
+            payload = json.dumps({"action": "get-access-token"}).encode("utf-8")
+            s.sendall(payload)
+            s.shutdown(socket.SHUT_WR)
+            
+            resp_bytes = s.recv(4096)
+            s.close()
+            
+            resp = json.loads(resp_bytes.decode("utf-8"))
+            if resp.get("status") == "success":
+                access_token = resp.get("access_token")
+                self.expires_at = resp.get("expires_at")
+                self.cas_token = f"xet_session_prj_{self.project_slug}_{access_token}"
+                print("Token successfully refreshed via Go IPC socket", file=sys.stderr)
+            else:
+                print(f"IPC token request failed: {resp.get('error')}", file=sys.stderr)
+        except Exception as e:
+            print(f"Token refresh failed in Python helper: {e}", file=sys.stderr)
+
+        return self.cas_token, self.expires_at
 
 def compute_sha256(filepath):
     h = hashlib.sha256()
@@ -34,14 +78,13 @@ def do_download(endpoint, cas_token, expires_at, files_json):
             )
         )
     
-    def refresher():
-        return cas_token, expires_at
+    refresher = TokenRefresher(cas_token, expires_at)
 
     hf_xet.download_files(
         files=download_infos,
         endpoint=endpoint,
         token_info=(cas_token, expires_at),
-        token_refresher=refresher,
+        token_refresher=refresher.refresh,
         progress_updater=None,
         request_headers=None
     )
@@ -52,14 +95,13 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
     files_list = json.loads(files_json)
     local_paths = [f["local_path"] for f in files_list]
     
-    def refresher():
-        return cas_token, expires_at
+    refresher = TokenRefresher(cas_token, expires_at)
 
     upload_results = hf_xet.upload_files(
         file_paths=local_paths,
         endpoint=endpoint,
         token_info=(cas_token, expires_at),
-        token_refresher=refresher,
+        token_refresher=refresher.refresh,
         progress_updater=None,
         _repo_type=None,
         request_headers=None,
@@ -78,6 +120,7 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
             "content_type": "application/octet-stream"
         })
     
+    current_token, _ = refresher.refresh()
     payload = json.dumps({"items": registration_items}).encode("utf-8")
     req = urllib.request.Request(
         register_url,
@@ -85,7 +128,7 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
         headers={
             "Content-Type": "application/json",
             "X-Project-Slug": project_slug,
-            "Authorization": f"Bearer {cas_token}"
+            "Authorization": f"Bearer {current_token}"
         },
         method="POST"
     )
