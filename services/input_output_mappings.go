@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -90,6 +89,10 @@ func remoteCopy(source, destination string) error {
 			destinationFile = destination
 		}
 
+		if strings.HasPrefix(destinationFile, "/") {
+			destinationFile = destinationFile + filepath.Base(file)
+		}
+
 		if err := os.MkdirAll(filepath.Dir(destinationFile), os.ModePerm); err != nil {
 			return fmt.Errorf("error creating directory: %v", err)
 		}
@@ -137,66 +140,6 @@ func remoteCopy(source, destination string) error {
 	defer cancel()
 	if err := RunHelperCommand(ctx, args); err != nil {
 		return fmt.Errorf("hf_xet download failed: %w", err)
-	}
-
-	return nil
-}
-
-func graphStorageCopy(source, destination string) error {
-	srcInfo, err := os.Stat(source)
-	if err != nil {
-		return fmt.Errorf("source error: %w", err)
-	}
-
-	if !srcInfo.IsDir() {
-		return fmt.Errorf("source is not a directory")
-	}
-
-	// Create destination if it doesn't exist
-	if _, err := os.Stat(destination); os.IsNotExist(err) {
-		if err := os.MkdirAll(destination, srcInfo.Mode()); err != nil {
-			return fmt.Errorf("failed to create destination: %w", err)
-		}
-	}
-
-	// Walk through the source
-	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-
-		destPath := filepath.Join(destination, relPath)
-
-		if info.IsDir() {
-			return os.MkdirAll(destPath, info.Mode())
-		}
-
-		// Copy file
-		return copyFile(path, destPath, info.Mode())
-	})
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("failed to open source file: %w", err)
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return fmt.Errorf("failed to create destination file: %w", err)
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("copy failed: %w", err)
 	}
 
 	return nil
@@ -376,8 +319,8 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 		destination := splittedInputMapping[1]
 
 		if !strings.HasPrefix(source, "__acc__") &&
-			!strings.HasPrefix(source, "/mnt/pipe") &&
-			!strings.HasPrefix(source, "/mnt/graph") &&
+			!strings.HasPrefix(source, "/mnt/tmp") &&
+			!strings.HasPrefix(source, "/mnt/wdrv") &&
 			source != "selected_files" &&
 			source != "selected_folders" {
 			return nil, nil, fmt.Errorf("error: invalid source in input mappings %s:%s", source, destination)
@@ -441,8 +384,7 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 					for _, selectedFile := range selectedFiles {
 
 						if selectedFile != "" {
-							newDestination := fmt.Sprintf("%s%s", destination, selectedFile)
-							newMapping := fmt.Sprintf("acc://%s:%s", selectedFile, newDestination)
+							newMapping := fmt.Sprintf("acc://%s:%s", selectedFile, destination)
 							newMappings = append(newMappings, newMapping)
 						}
 					}
@@ -474,26 +416,13 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 			}
 		}
 
-		if strings.HasSuffix(destination, "/*") {
-			if strings.HasPrefix(source, "__acc__") {
-				destination = strings.TrimSuffix(destination, "/*") + "/" + strings.TrimPrefix(source, "__acc__")
-			}
-		}
-
 		if !strings.HasPrefix(destination, "/") {
 			return nil, nil, fmt.Errorf("error: invalid destination path: always use absolute path")
 		}
 
-		if strings.HasPrefix(source, "/mnt/pipe") {
+		if strings.HasPrefix(source, "/mnt/tmp") || strings.HasPrefix(source, "/mnt/wdrv") {
 			symlinkQueue = append(symlinkQueue, func() error {
 				if err := inputMappingFromMountedStorage(source, destination); err != nil {
-					return err
-				}
-				return nil
-			})
-		} else if strings.HasPrefix(source, "/mnt/graph") {
-			taskQueue = append(taskQueue, func() error {
-				if err := graphStorageCopy(source, destination); err != nil {
 					return err
 				}
 				return nil
@@ -538,8 +467,8 @@ func preProcessOutputMappings(outputMappings []string) ([]func() error, error) {
 		}
 
 		if !strings.HasPrefix(destination, "__acc__") &&
-			!strings.HasPrefix(destination, "/mnt/pipe") &&
-			!strings.HasPrefix(destination, "/mnt/graph") {
+			!strings.HasPrefix(destination, "/mnt/tmp") &&
+			!strings.HasPrefix(destination, "/mnt/wdrv") {
 			return nil, fmt.Errorf("error: invalid destination in output mappings")
 		}
 
@@ -547,7 +476,7 @@ func preProcessOutputMappings(outputMappings []string) ([]func() error, error) {
 			destination = "__acc__" + source
 		}
 
-		if strings.HasPrefix(destination, "/mnt/pipe") {
+		if strings.HasPrefix(destination, "/mnt/tmp") || strings.HasPrefix(destination, "/mnt/wdrv") {
 			symlinkQueue = append(symlinkQueue, func() error {
 				if err := outputMappingToMountedStorage(destination, source); err != nil {
 					return err
@@ -586,8 +515,8 @@ func postProcessOutputMappings(outputMappings []string) ([]func() error, error) 
 		}
 
 		if !strings.HasPrefix(destination, "__acc__") &&
-			!strings.HasPrefix(destination, "/mnt/pipe") &&
-			!strings.HasPrefix(destination, "/mnt/graph") {
+			!strings.HasPrefix(destination, "/mnt/tmp") &&
+			!strings.HasPrefix(destination, "/mnt/wdrv") {
 			return nil, fmt.Errorf("error: invalid destination in output mappings")
 		}
 
@@ -599,13 +528,6 @@ func postProcessOutputMappings(outputMappings []string) ([]func() error, error) 
 			destination = strings.TrimPrefix(destination, "__acc__")
 			taskQueue = append(taskQueue, func() error {
 				if err := remotePush(source, destination); err != nil {
-					return err
-				}
-				return nil
-			})
-		} else if strings.HasPrefix(destination, "/mnt/graph") {
-			taskQueue = append(taskQueue, func() error {
-				if err := graphStorageCopy(source, destination); err != nil {
 					return err
 				}
 				return nil
