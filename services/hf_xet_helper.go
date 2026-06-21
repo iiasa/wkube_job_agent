@@ -37,6 +37,7 @@ class TokenRefresher:
 
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(30)
             s.connect("/tmp/wagt.sock")
             payload = json.dumps({"action": "get-access-token"}).encode("utf-8")
             s.sendall(payload)
@@ -53,6 +54,8 @@ class TokenRefresher:
                 print("Token successfully refreshed via Go IPC socket", file=sys.stderr)
             else:
                 print(f"IPC token request failed: {resp.get('error')}", file=sys.stderr)
+        except socket.timeout:
+            print("Token refresh timed out after 30s waiting for IPC server", file=sys.stderr)
         except Exception as e:
             print(f"Token refresh failed in Python helper: {e}", file=sys.stderr)
 
@@ -79,13 +82,24 @@ def do_download(endpoint, cas_token, expires_at, files_json):
         )
     
     refresher = TokenRefresher(cas_token, expires_at)
-
+    
+    print(f"Starting download of {len(download_infos)} files via hf_xet...", file=sys.stderr)
+    
+    total_size = sum(f.get("file_size", 0) for f in files_list)
+    
+    def progress_updater(downloaded_bytes):
+        if total_size > 0:
+            percent = (downloaded_bytes / total_size) * 100
+            print(f"Download progress: {percent:.2f}% ({downloaded_bytes}/{total_size} bytes)", file=sys.stderr)
+        else:
+            print(f"Download progress: {downloaded_bytes} bytes", file=sys.stderr)
+    
     hf_xet.download_files(
         files=download_infos,
         endpoint=endpoint,
         token_info=(cas_token, expires_at),
         token_refresher=refresher.refresh,
-        progress_updater=None,
+        progress_updater=[progress_updater],
         request_headers=None
     )
     print("DOWNLOAD_SUCCESS")
@@ -227,6 +241,10 @@ func RunHelperCommand(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, pythonBin, fullArgs...)
 	cmd.Stdout = MultiLogWriter
 	cmd.Stderr = MultiLogWriter
+	cmd.Env = append(os.Environ(),
+		"RUST_LOG=debug",
+		"HF_XET_LOG_DEST=stderr",
+	)
 
 	return cmd.Run()
 }

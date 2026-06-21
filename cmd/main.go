@@ -54,18 +54,6 @@ func main() {
 			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
 		}
 
-		projectSlug := services.GetProjectSlug()
-		if projectSlug != "" {
-			if err := services.RemotePushLog("/tmp/job.log", services.LogFileName, projectSlug); err != nil {
-				fmt.Fprintf(services.MultiLogWriter, "error uploading job log via xet: %v\n", err)
-			}
-		} else {
-			fmt.Fprintln(services.MultiLogWriter, "warning: project slug not found, attempting standard upload")
-			if err := services.UploadFile("/tmp/job.log", services.LogFileName); err != nil {
-				fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v\n", err)
-			}
-		}
-
 		if r := recover(); r != nil {
 			fmt.Fprintf(services.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
 		} else if errOccurred != nil {
@@ -77,6 +65,18 @@ func main() {
 
 			if err := services.UpdateJobStatus("DONE"); err != nil {
 				fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v", err)
+			}
+		}
+
+		projectSlug := services.GetProjectSlug()
+		if projectSlug != "" {
+			if err := services.RemotePushLog("/tmp/job.log", services.LogFileName, projectSlug); err != nil {
+				fmt.Fprintf(services.MultiLogWriter, "error uploading job log via xet: %v\n", err)
+			}
+		} else {
+			fmt.Fprintln(services.MultiLogWriter, "warning: project slug not found, attempting standard upload")
+			if err := services.UploadFile("/tmp/job.log", services.LogFileName); err != nil {
+				fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v\n", err)
 			}
 		}
 

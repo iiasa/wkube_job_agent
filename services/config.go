@@ -20,6 +20,7 @@ var (
 	RemoteLogSink       *RemoteLogger
 	MultiLogWriter      io.Writer
 	LogFileName         string
+	RootCtx             context.Context
 )
 
 type RetryTransport struct {
@@ -66,6 +67,8 @@ func isRetryable(err error) bool {
 }
 
 func Init(ctx context.Context, cancel context.CancelFunc) {
+	RootCtx = ctx
+
 	// Base transport for regular HTTP/1.1
 	transport := &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},

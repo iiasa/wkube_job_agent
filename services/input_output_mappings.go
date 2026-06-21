@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type downloadFileInfo struct {
@@ -25,7 +26,8 @@ type FileStat struct {
 }
 
 func getFileStat(filename string) (*FileStat, error) {
-	projectSlug := strings.Split(filename, "/")[0]
+	projectSlug := GetProjectSlug()
+
 	endpoint := fmt.Sprintf("/%s/file-stat/", projectSlug)
 
 	payload := map[string]string{
@@ -92,7 +94,11 @@ func remoteCopy(source, destination string) error {
 			return fmt.Errorf("error creating directory: %v", err)
 		}
 
-		stat, err := getFileStat(file)
+		projectSlug := GetProjectSlug()
+
+		fileParam := strings.TrimPrefix(file, projectSlug+"/")
+
+		stat, err := getFileStat(fileParam)
 		if err != nil {
 			return fmt.Errorf("error getting stat for %s: %v", file, err)
 		}
@@ -127,7 +133,8 @@ func remoteCopy(source, destination string) error {
 	}
 
 	fmt.Fprintf(MultiLogWriter, "Downloading %d files via hf_xet...\n", len(downloadList))
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
+	defer cancel()
 	if err := RunHelperCommand(ctx, args); err != nil {
 		return fmt.Errorf("hf_xet download failed: %w", err)
 	}
@@ -271,7 +278,8 @@ func remotePush(source, destination string) error {
 	}
 
 	fmt.Fprintf(MultiLogWriter, "Uploading %d files via hf_xet...\n", len(uploadList))
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
+	defer cancel()
 	if err := RunHelperCommand(ctx, args); err != nil {
 		return fmt.Errorf("hf_xet upload failed: %w", err)
 	}
@@ -477,7 +485,7 @@ func processInputMappings(inputMappings []string) ([]func() error, []func() erro
 		}
 
 		if strings.HasPrefix(source, "/mnt/pipe") {
-			symlinkQueue = append(taskQueue, func() error {
+			symlinkQueue = append(symlinkQueue, func() error {
 				if err := inputMappingFromMountedStorage(source, destination); err != nil {
 					return err
 				}
@@ -801,11 +809,11 @@ func RemotePushLog(source, destination, projectSlug string) error {
 	}
 
 	fmt.Fprintf(MultiLogWriter, "Uploading %d log files via hf_xet...\n", len(uploadList))
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
+	defer cancel()
 	if err := RunHelperCommand(ctx, args); err != nil {
 		return fmt.Errorf("hf_xet log upload failed: %w", err)
 	}
 
 	return nil
 }
-
