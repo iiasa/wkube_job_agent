@@ -62,6 +62,10 @@ func getFileStat(filename string) (*FileStat, error) {
 }
 
 func remoteCopy(source, destination string) error {
+	// soure could be a file or folder
+	// destination could be a file or folder, if destionation ends with / it is considered as folder otherwise file
+	// if soure is folder we should copy all the files one by one to destination appendinf relative filepath from source folder into destination folder.
+	// if source is a single file and destination is folder we should copy the file to that folder with same filename
 	files, err := EnumerateFilesByPrefix(source)
 	if err != nil {
 		return fmt.Errorf("error enumerating files- %v", err)
@@ -90,7 +94,7 @@ func remoteCopy(source, destination string) error {
 		}
 
 		if strings.HasPrefix(destinationFile, "/") {
-			destinationFile = destinationFile + filepath.Base(file)
+			destinationFile = filepath.Join(destinationFile, filepath.Base(file))
 		}
 
 		if err := os.MkdirAll(filepath.Dir(destinationFile), os.ModePerm); err != nil {
