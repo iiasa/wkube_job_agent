@@ -244,6 +244,40 @@ func remotePush(source, destination string) error {
 	return nil
 }
 
+func mergeDirectory(srcDir, destDir string) error {
+	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+
+		targetPath := filepath.Join(destDir, relPath)
+
+		if d.IsDir() {
+			return os.MkdirAll(targetPath, 0775)
+		}
+
+		// Check if it already exists in the target mount directory
+		if _, err := os.Stat(targetPath); err == nil {
+			// Exists at mount, preserve it (skip copying)
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+
+		// Copy file content using ReadFile/WriteFile
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(targetPath, data, 0664)
+	})
+}
+
 func inputMappingFromMountedStorage(source, destination string) error {
 
 	if _, err := os.Stat(source); os.IsNotExist(err) {
@@ -286,23 +320,42 @@ func inputMappingFromMountedStorage(source, destination string) error {
 				return fmt.Errorf("error removing existing symlink '%s' pointing to '%s': %v", destination, target, err)
 			}
 		} else if info.IsDir() {
-			// Check if directory is empty
-			f, err := os.Open(destination)
-			if err != nil {
-				return fmt.Errorf("error opening existing directory '%s': %v", destination, err)
+			// Recursively copy/merge files to the source directory
+			if err := mergeDirectory(destination, source); err != nil {
+				return fmt.Errorf("error merging pre-existing directory '%s' to '%s': %v", destination, source, err)
 			}
-			defer f.Close()
-			_, err = f.Readdirnames(1)
-			if err == nil { // Not empty (it successfully returned at least one name)
-				return fmt.Errorf("error: destination directory '%s' is not empty; aborting to prevent data loss", destination)
-			}
-			// It is empty. We can safely remove it.
-			if err := os.Remove(destination); err != nil {
-				return fmt.Errorf("error removing empty directory '%s': %v", destination, err)
+			// Safe to delete local files now that they have been merged
+			if err := os.RemoveAll(destination); err != nil {
+				return fmt.Errorf("error removing merged directory '%s': %v", destination, err)
 			}
 		} else {
-			// Regular file or other type: fail due to conflict
-			return fmt.Errorf("error: destination '%s' already exists as a file or non-directory; aborting conflict to prevent data loss", destination)
+			// It is a regular file. Merge it to the source.
+			sourceInfo, err := os.Stat(source)
+			if err != nil {
+				return fmt.Errorf("error checking source '%s': %v", source, err)
+			}
+			var targetPath string
+			if sourceInfo.IsDir() {
+				targetPath = filepath.Join(source, filepath.Base(destination))
+			} else {
+				targetPath = source
+			}
+
+			// Copy if it doesn't exist on the mount
+			if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+				data, err := os.ReadFile(destination)
+				if err != nil {
+					return fmt.Errorf("error reading conflicting file '%s': %v", destination, err)
+				}
+				if err := os.WriteFile(targetPath, data, 0664); err != nil {
+					return fmt.Errorf("error merging conflicting file to '%s': %v", targetPath, err)
+				}
+			}
+
+			// Remove original conflicting file
+			if err := os.Remove(destination); err != nil {
+				return fmt.Errorf("error removing conflicting file '%s': %v", destination, err)
+			}
 		}
 	} else if !os.IsNotExist(err) {
 		// Some other error accessing destination
