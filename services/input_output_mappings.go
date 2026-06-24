@@ -88,13 +88,13 @@ func remoteCopy(source, destination string) error {
 		if strings.HasSuffix(destination, "/") {
 			relPath := strings.TrimPrefix(file, source)
 			relPath = strings.TrimPrefix(relPath, "/")
-			destinationFile = filepath.Join(destination, relPath)
+			if relPath == "" {
+				destinationFile = filepath.Join(destination, filepath.Base(file))
+			} else {
+				destinationFile = filepath.Join(destination, relPath)
+			}
 		} else {
 			destinationFile = destination
-		}
-
-		if strings.HasPrefix(destinationFile, "/") {
-			destinationFile = filepath.Join(destinationFile, filepath.Base(file))
 		}
 
 		if err := os.MkdirAll(filepath.Dir(destinationFile), os.ModePerm); err != nil {
@@ -155,8 +155,6 @@ type uploadFileInfo struct {
 }
 
 func remotePush(source, destination string) error {
-	destination = strings.TrimRight(destination, string(os.PathSeparator))
-
 	info, err := os.Stat(source)
 	if err != nil {
 		return err
@@ -165,9 +163,17 @@ func remotePush(source, destination string) error {
 	var uploadList []uploadFileInfo
 
 	if !info.IsDir() {
+		var remotePath string
+		if strings.HasSuffix(destination, "/") {
+			remotePath = filepath.Join(destination, filepath.Base(source))
+		} else {
+			remotePath = destination
+		}
+		remotePath = strings.TrimRight(remotePath, string(os.PathSeparator))
+
 		uploadList = append(uploadList, uploadFileInfo{
 			LocalPath:  source,
-			RemotePath: destination,
+			RemotePath: remotePath,
 		})
 	} else {
 		err = filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
@@ -184,6 +190,7 @@ func remotePush(source, destination string) error {
 			}
 
 			destPath := filepath.Join(destination, relPath)
+			destPath = strings.TrimRight(destPath, string(os.PathSeparator))
 			uploadList = append(uploadList, uploadFileInfo{
 				LocalPath:  path,
 				RemotePath: destPath,
@@ -254,6 +261,9 @@ func inputMappingFromMountedStorage(source, destination string) error {
 
 	}
 
+	// Clean destination path
+	destination = strings.TrimRight(destination, "/")
+
 	// Ensure destination's parent directory exists
 	if err := os.MkdirAll(filepath.Dir(destination), 0775); err != nil {
 		return fmt.Errorf("error creating parent directory: %v", err)
@@ -262,20 +272,42 @@ func inputMappingFromMountedStorage(source, destination string) error {
 	// Check if destination exists
 	if info, err := os.Lstat(destination); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
-			// Destination is a symlink — throw an error
-			return fmt.Errorf("error: destination '%s' is already a symlink — conflict. There must be identical mapping. or a already existing symlink in the job container", destination)
-		} else {
-			// Not a symlink — remove it
-			if err := os.RemoveAll(destination); err != nil {
-				return fmt.Errorf("error removing existing non-symlink destination '%s': %v", destination, err)
+			// It is a symlink. Check where it points.
+			target, err := os.Readlink(destination)
+			if err != nil {
+				return fmt.Errorf("error reading existing symlink '%s': %v", destination, err)
 			}
+			if target == source {
+				// Already correctly mapped
+				return nil
+			}
+			// Points to a different source, delete it so we can re-create it
+			if err := os.Remove(destination); err != nil {
+				return fmt.Errorf("error removing existing symlink '%s' pointing to '%s': %v", destination, target, err)
+			}
+		} else if info.IsDir() {
+			// Check if directory is empty
+			f, err := os.Open(destination)
+			if err != nil {
+				return fmt.Errorf("error opening existing directory '%s': %v", destination, err)
+			}
+			defer f.Close()
+			_, err = f.Readdirnames(1)
+			if err == nil { // Not empty (it successfully returned at least one name)
+				return fmt.Errorf("error: destination directory '%s' is not empty; aborting to prevent data loss", destination)
+			}
+			// It is empty. We can safely remove it.
+			if err := os.Remove(destination); err != nil {
+				return fmt.Errorf("error removing empty directory '%s': %v", destination, err)
+			}
+		} else {
+			// Regular file or other type: fail due to conflict
+			return fmt.Errorf("error: destination '%s' already exists as a file or non-directory; aborting conflict to prevent data loss", destination)
 		}
 	} else if !os.IsNotExist(err) {
 		// Some other error accessing destination
 		return fmt.Errorf("error checking destination '%s': %v", destination, err)
 	}
-
-	destination = strings.TrimRight(destination, "/")
 
 	// Create the symlink
 	if err := os.Symlink(source, destination); err != nil {
