@@ -530,6 +530,10 @@ func postProcessOutputMappings(outputMappings []string) ([]func() error, error) 
 
 		if strings.HasPrefix(destination, "__acc__") {
 			destination = strings.TrimPrefix(destination, "__acc__")
+			rootJobID := os.Getenv("ROOT_JOB_ID")
+			if rootJobID != "" {
+				destination = fmt.Sprintf("job-outputs/%s/%s", rootJobID, strings.TrimPrefix(destination, "/"))
+			}
 			taskQueue = append(taskQueue, func() error {
 				if err := remotePush(source, destination); err != nil {
 					return err
@@ -666,6 +670,10 @@ func GetProjectSlug() string {
 }
 
 func RemotePushLog(source, destination, projectSlug string) error {
+	jobID := os.Getenv("JOB_ID")
+	if jobID != "" {
+		destination = fmt.Sprintf("job-outputs/%s/%s", jobID, strings.TrimPrefix(destination, "/"))
+	}
 	destination = strings.TrimRight(destination, string(os.PathSeparator))
 
 	info, err := os.Stat(source)
