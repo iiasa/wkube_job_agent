@@ -204,7 +204,10 @@ func remotePush(source, destination string) error {
 		return err
 	}
 
-	projectSlug := strings.Split(uploadList[0].RemotePath, "/")[0]
+	projectSlug := GetProjectSlug()
+	if projectSlug == "" {
+		projectSlug = strings.Split(uploadList[0].RemotePath, "/")[0]
+	}
 	gatewayServer := getenvWithDefault("ACC_JOB_GATEWAY_SERVER", "https://accelerator.iiasa.ac.at")
 	casEndpoint := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas"
 	accessToken, expiresAt, err := GetAccessToken()
