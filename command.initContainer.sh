@@ -1,9 +1,9 @@
 #!/bin/bash
 
 binary_url="https://testwithfastapi.s3.amazonaws.com/wagt-v0.5.4-linux-amd/wagt"
-binary_file="/mnt/temp/.wkube_agent/wagt"
+binary_file="/mnt/tmp/.wkube_agent/wagt"
 
-mkdir -p /mnt/temp/.wkube_agent
+mkdir -p /mnt/tmp/.wkube_agent
 
 download_with_curl() {
     if command -v curl &>/dev/null; then

@@ -62,4 +62,4 @@ RUN cat /etc/ssl/certs/ca-certificates.crt \
     > /agent/ca_bundle.pem
 
 # Recursively copy all bundled agent executables and python virtual environment to the shared volume
-ENTRYPOINT ["sh", "-c", "cp -rp /agent/* /mnt/temp/.wkube_agent/"]
+ENTRYPOINT ["sh", "-c", "cp -rp /agent/* /mnt/tmp/.wkube_agent/"]
