@@ -1,6 +1,6 @@
 #!/bin/bash
 
-binary_file="/mnt/agent/wagt"
+binary_file="/mnt/temp/.wkube_agent/wagt"
 
 if [ ! -f "$binary_file" ]; then
     echo "Error: Binary file not found. Please download it first."

@@ -22,9 +22,9 @@ var (
 	LogFileName         string
 	RootCtx             context.Context
 
-	JobLogPath     = getenvWithDefault("WAGT_JOB_LOG_PATH", "/mnt/agent/job.log")
-	JobExitCodePath = getenvWithDefault("WAGT_EXIT_CODE_PATH", "/mnt/agent/exit_code")
-	LogCounterPath = getenvWithDefault("WAGT_LOG_COUNTER_PATH", "/mnt/agent/log_counter")
+	JobLogPath     = getenvWithDefault("WAGT_JOB_LOG_PATH", "/mnt/temp/.wkube_agent/job.log")
+	JobExitCodePath = getenvWithDefault("WAGT_EXIT_CODE_PATH", "/mnt/temp/.wkube_agent/exit_code")
+	LogCounterPath = getenvWithDefault("WAGT_LOG_COUNTER_PATH", "/mnt/temp/.wkube_agent/log_counter")
 )
 
 type RetryTransport struct {

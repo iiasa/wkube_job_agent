@@ -186,12 +186,12 @@ if __name__ == "__main__":
     main()
 `
 
-const RuntimeDir = "/mnt/agent/xet_python"
+const RuntimeDir = "/mnt/temp/.wkube_agent/xet_python"
 const LocalDevDir = "/agent/xet_python"
 
 // WriteHelperScript writes the helper python script to the temporary execution directory.
 func WriteHelperScript() error {
-	destDir := "/mnt/agent"
+	destDir := "/mnt/temp/.wkube_agent"
 	if _, err := os.Stat(destDir); os.IsNotExist(err) {
 		destDir = "/agent" // Local dev fallback
 	}
@@ -231,7 +231,7 @@ func RunHelperCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	destDir := "/mnt/agent"
+	destDir := "/mnt/temp/.wkube_agent"
 	if _, err := os.Stat(destDir); os.IsNotExist(err) {
 		destDir = "/agent" // Local dev fallback
 	}

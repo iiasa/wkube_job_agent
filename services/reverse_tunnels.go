@@ -76,7 +76,7 @@ func startReverseTunnel(localSocket string) error {
 
 	sshArgs = append(sshArgs, sshUser+"@"+sshServer)
 
-	cmd := exec.Command("/mnt/agent/ssh", sshArgs...)
+	cmd := exec.Command("/mnt/temp/.wkube_agent/ssh", sshArgs...)
 	cmd.Stdout = MultiLogWriter
 	cmd.Stderr = MultiLogWriter
 
