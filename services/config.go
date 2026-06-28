@@ -21,6 +21,10 @@ var (
 	MultiLogWriter      io.Writer
 	LogFileName         string
 	RootCtx             context.Context
+
+	JobLogPath     = getenvWithDefault("WAGT_JOB_LOG_PATH", "/mnt/agent/job.log")
+	JobExitCodePath = getenvWithDefault("WAGT_EXIT_CODE_PATH", "/mnt/agent/exit_code")
+	LogCounterPath = getenvWithDefault("WAGT_LOG_COUNTER_PATH", "/mnt/agent/log_counter")
 )
 
 type RetryTransport struct {
@@ -114,7 +118,7 @@ func Init(ctx context.Context, cancel context.CancelFunc) {
 
 	LogFileName = fmt.Sprintf("logs/full/job-%s.log", podID)
 
-	logFile, err := os.OpenFile("/tmp/job.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(JobLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		panic("failed to open log file: " + err.Error())
 	}

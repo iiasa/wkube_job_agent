@@ -125,3 +125,15 @@ func (rl *RemoteLogger) Wait() {
 func (rl *RemoteLogger) FinalFlush() {
 	rl.flushFromChannel(nil)
 }
+
+func GetLogCounter() int {
+	counterMu.Lock()
+	defer counterMu.Unlock()
+	return logCounter
+}
+
+func SetLogCounter(n int) {
+	counterMu.Lock()
+	defer counterMu.Unlock()
+	logCounter = n
+}

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -17,21 +18,18 @@ func abortIfCancelled(ctx context.Context, where string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("context cancelled during %s — aborting", where)
 	}
-
 	return nil
 }
 
-func main() {
+func cmdRun(command string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	services.Init(ctx, cancel)
 
 	go services.StartIPCServer(ctx)
 
-	var errOccurred error
 	var cmd *exec.Cmd
 
-	// Signal handler
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 
@@ -39,59 +37,10 @@ func main() {
 		sig := <-sigChan
 		fmt.Fprintf(services.MultiLogWriter, "Received signal: %s — forwarding to child process\n", sig)
 		if cmd != nil && cmd.Process != nil {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) // Send to process group
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		}
 		cancel()
 	}()
-
-	defer func() {
-
-		if err := services.PostProcessMappings(); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "error in post-process-mappings: %v", err)
-		}
-
-		if err := services.VerboseResourceReport(); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
-		}
-
-		if r := recover(); r != nil {
-			fmt.Fprintf(services.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
-		} else if errOccurred != nil {
-			if err := services.UpdateJobStatus("ERROR"); err != nil {
-				fmt.Fprintf(services.MultiLogWriter, "Error updating status to ERROR: %v \n", err)
-			}
-			fmt.Fprintf(services.MultiLogWriter, "Error: %v \n", errOccurred)
-		} else {
-
-			if err := services.UpdateJobStatus("DONE"); err != nil {
-				fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v", err)
-			}
-		}
-
-		projectSlug := services.GetProjectSlug()
-		if projectSlug != "" {
-			if err := services.RemotePushLog("/tmp/job.log", services.LogFileName, projectSlug); err != nil {
-				fmt.Fprintf(services.MultiLogWriter, "error uploading job log via xet: %v\n", err)
-			}
-		} else {
-			fmt.Fprintln(services.MultiLogWriter, "warning: project slug not found, attempting standard upload")
-			if err := services.UploadFile("/tmp/job.log", services.LogFileName); err != nil {
-				fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v\n", err)
-			}
-		}
-
-		services.RemoteLogSink.FinalFlush()
-	}()
-
-	if len(os.Args) < 2 {
-		errOccurred = fmt.Errorf("usage: go run main.go <command>")
-		return
-	}
-
-	command := os.Args[1]
-	// cmd = exec.Command("/bin/sh", "-c", command)
-	cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	go func() {
 		<-ctx.Done()
@@ -105,33 +54,61 @@ func main() {
 		}
 	}()
 
+	exitCode := 0
+
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(services.MultiLogWriter, "Panic: %v\nStack trace: %s\n", r, debug.Stack())
+			exitCode = 1
+		}
+
+		if err := os.WriteFile(services.JobExitCodePath, []byte(strconv.Itoa(exitCode)+"\n"), 0644); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error writing exit code: %v\n", err)
+		}
+
+		services.RemoteLogSink.FinalFlush()
+
+		counterStr := strconv.Itoa(services.GetLogCounter()) + "\n"
+		if err := os.WriteFile(services.LogCounterPath, []byte(counterStr), 0644); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error writing log counter: %v\n", err)
+		}
+
+		os.Exit(0)
+	}()
+
+	cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	cmd.Stdout = services.MultiLogWriter
 	cmd.Stderr = services.MultiLogWriter
 
 	if err := services.UpdateJobStatus("MAPPING_INPUTS"); err != nil {
-		errOccurred = fmt.Errorf("error updating status to MAPPING_INPUTS: %v", err)
+		fmt.Fprintf(services.MultiLogWriter, "error updating status to MAPPING_INPUTS: %v\n", err)
+		exitCode = 1
 		return
 	}
 
 	if err := services.PreProcessMappings(); err != nil {
-		errOccurred = fmt.Errorf("error in pre-process-mappings: %v", err)
+		fmt.Fprintf(services.MultiLogWriter, "error in pre-process-mappings: %v\n", err)
+		exitCode = 1
 		return
 	}
 
 	if err := abortIfCancelled(ctx, "input mappings"); err != nil {
-		errOccurred = fmt.Errorf("%v", err)
+		fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
+		exitCode = 1
 		return
 	}
 
 	if err := services.UpdateJobStatus("PROCESSING"); err != nil {
-		errOccurred = fmt.Errorf("error updating status to PROCESSING: %v", err)
+		fmt.Fprintf(services.MultiLogWriter, "error updating status to PROCESSING: %v\n", err)
+		exitCode = 1
 		return
 	}
 
 	if err := services.ReportNodeName(); err != nil {
-		errOccurred = fmt.Errorf("error reporting node name: %v", err)
-		return
+		fmt.Fprintf(services.MultiLogWriter, "error reporting node name: %v\n", err)
 	}
 
 	if socketAddress := os.Getenv("interactive_socket"); socketAddress != "" {
@@ -141,7 +118,7 @@ func main() {
 		go func() {
 			select {
 			case err := <-tunnelErrCh:
-				fmt.Fprintf(services.MultiLogWriter, "❌ Tunnel broke: %v — shutting down job\n", err)
+				fmt.Fprintf(services.MultiLogWriter, "Tunnel broke: %v — shutting down job\n", err)
 				cancel()
 			case <-ctx.Done():
 			}
@@ -149,29 +126,117 @@ func main() {
 	}
 
 	if err := abortIfCancelled(ctx, "tunnel setup"); err != nil {
-		errOccurred = fmt.Errorf("%v", err)
+		fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
+		exitCode = 1
 		return
 	}
 
-	// Start the command
 	if err := cmd.Start(); err != nil {
-		errOccurred = fmt.Errorf("error starting command: %v", err)
+		fmt.Fprintf(services.MultiLogWriter, "error starting command: %v\n", err)
+		exitCode = 1
 		return
 	}
 
-	// Wait for command to complete
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			errOccurred = fmt.Errorf("Command interrupted due to context cancellation: %v\n", ctx.Err())
-			return
+			fmt.Fprintf(services.MultiLogWriter, "Command interrupted due to context cancellation: %v\n", ctx.Err())
+		} else {
+			fmt.Fprintf(services.MultiLogWriter, "command execution error: %v\n", err)
 		}
-		errOccurred = fmt.Errorf("command execution error: %v", err)
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
 		return
+	}
+
+	exitCode = 0
+}
+
+func cmdFinalize() {
+	exitCode := 1
+
+	exitCodeRaw, err := os.ReadFile(services.JobExitCodePath)
+	if err == nil {
+		if n, err := strconv.Atoi(string(exitCodeRaw)); err == nil {
+			exitCode = n
+		}
+	}
+
+	counterRaw, err := os.ReadFile(services.LogCounterPath)
+	if err == nil {
+		if n, err := strconv.Atoi(string(counterRaw)); err == nil {
+			services.SetLogCounter(n)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	services.Init(ctx, cancel)
+
+	postProcessErr := services.PostProcessMappings()
+	if postProcessErr != nil {
+		fmt.Fprintf(services.MultiLogWriter, "error in post-process-mappings: %v\n", postProcessErr)
+	}
+
+	if err := services.VerboseResourceReport(); err != nil {
+		fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
 	}
 
 	if err := services.UpdateJobStatus("MAPPING_OUTPUTS"); err != nil {
-		errOccurred = fmt.Errorf("error updating status to MAPPING_OUTPUTS: %v", err)
-		return
+		fmt.Fprintf(services.MultiLogWriter, "error updating status to MAPPING_OUTPUTS: %v\n", err)
 	}
 
+	if exitCode == 0 && postProcessErr == nil {
+		if err := services.UpdateJobStatus("DONE"); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v\n", err)
+		}
+	} else {
+		if err := services.UpdateJobStatus("ERROR"); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error updating status to ERROR: %v\n", err)
+		}
+	}
+
+	projectSlug := services.GetProjectSlug()
+	if projectSlug != "" {
+		if err := services.RemotePushLog(services.JobLogPath, services.LogFileName, projectSlug); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error uploading job log via xet: %v\n", err)
+		}
+	} else {
+		fmt.Fprintln(services.MultiLogWriter, "warning: project slug not found, attempting standard upload")
+		if err := services.UploadFile(services.JobLogPath, services.LogFileName); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v\n", err)
+		}
+	}
+
+	services.RemoteLogSink.FinalFlush()
+
+	os.Exit(exitCode)
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "Usage:\n")
+	fmt.Fprintf(os.Stderr, "  wagt run \"<command>\"       — Phase 1: init → IPC → input mapping → run command\n")
+	fmt.Fprintf(os.Stderr, "  wagt finalize              — Phase 2: output mapping → resource report → status → push log\n")
+	os.Exit(1)
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+	}
+
+	switch os.Args[1] {
+	case "run":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "usage: wagt run \"<command>\"")
+			os.Exit(1)
+		}
+		cmdRun(os.Args[2])
+	case "finalize":
+		cmdFinalize()
+	default:
+		usage()
+	}
 }
