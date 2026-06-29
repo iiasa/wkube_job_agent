@@ -37,4 +37,4 @@ COPY --from=python-builder /agent/xet_python /agent/xet_python
 RUN chmod -R +x /agent/wagt /agent/ssh /agent/xet_python/bin/
 
 # Recursively copy all bundled agent executables and python virtual environment to the shared volume
-ENTRYPOINT ["sh", "-c", "cp -rp /agent/* /mnt/tmp/.wkube_agent/"]
+ENTRYPOINT ["sh", "-c", "mkdir -p /mnt/tmp/.wkube_agent && cp -rp /agent/* /mnt/tmp/.wkube_agent/"]
