@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -839,3 +841,109 @@ func RemotePushLog(source, destination, projectSlug string) error {
 
 	return nil
 }
+
+func UploadWdrvFilesCreatedByJobUid() error {
+	jobUidStr := os.Getenv("JOB_UID")
+	if jobUidStr == "" {
+		return nil // No JOB_UID set, skip
+	}
+	jobUid, err := strconv.ParseUint(jobUidStr, 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid JOB_UID %s: %v", jobUidStr, err)
+	}
+
+	projectSlug := GetProjectSlug()
+	if projectSlug == "" {
+		return fmt.Errorf("project_slug is empty")
+	}
+
+	var uploadList []uploadFileInfo
+
+	err = filepath.WalkDir("/mnt/wdrv", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			return nil
+		}
+
+		if stat.Uid == uint32(jobUid) {
+			relPath, err := filepath.Rel("/mnt/wdrv", path)
+			if err != nil {
+				return err
+			}
+			destPath := filepath.Join(projectSlug, relPath)
+			destPath = strings.TrimRight(destPath, string(os.PathSeparator))
+
+			uploadList = append(uploadList, uploadFileInfo{
+				LocalPath:  path,
+				RemotePath: destPath,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // /mnt/wdrv doesn't exist or is not mounted, skip
+		}
+		return fmt.Errorf("error walking /mnt/wdrv: %v", err)
+	}
+
+	if len(uploadList) == 0 {
+		fmt.Fprintln(MultiLogWriter, "No files created by JOB_UID found in /mnt/wdrv to upload.")
+		return nil
+	}
+
+	filesJSON, err := json.Marshal(uploadList)
+	if err != nil {
+		return err
+	}
+
+	gatewayServer := getenvWithDefault("ACC_JOB_GATEWAY_SERVER", "https://accelerator.iiasa.ac.at")
+	casEndpoint := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas"
+	accessToken, expiresAt, err := GetAccessToken()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve access token: %w", err)
+	}
+	casToken := fmt.Sprintf("xet_session_prj_%s_%s", projectSlug, accessToken)
+	registerUrl := strings.TrimRight(gatewayServer, "/") + "/api/xet-cas/v1/cas/bulk-register"
+
+	args := []string{
+		"upload",
+		projectSlug,
+		casEndpoint,
+		casToken,
+		fmt.Sprintf("%d", expiresAt),
+		registerUrl,
+		string(filesJSON),
+	}
+
+	fmt.Fprintf(MultiLogWriter, "Uploading %d files created by JOB_UID from /mnt/wdrv via hf_xet...\n", len(uploadList))
+	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
+	defer cancel()
+	if err := RunHelperCommand(ctx, args); err != nil {
+		return fmt.Errorf("hf_xet upload failed: %w", err)
+	}
+
+	fmt.Fprintf(MultiLogWriter, "Deleting uploaded files from /mnt/wdrv...\n")
+	for _, fileInfo := range uploadList {
+		if err := os.Remove(fileInfo.LocalPath); err != nil {
+			fmt.Fprintf(MultiLogWriter, "Failed to delete %s: %v\n", fileInfo.LocalPath, err)
+		} else {
+			fmt.Fprintf(MultiLogWriter, "Deleted %s\n", fileInfo.LocalPath)
+		}
+	}
+
+	return nil
+}
+

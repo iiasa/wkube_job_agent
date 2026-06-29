@@ -180,6 +180,11 @@ func cmdFinalize() {
 		fmt.Fprintf(services.MultiLogWriter, "error in post-process-mappings: %v\n", postProcessErr)
 	}
 
+	wdrvUploadErr := services.UploadWdrvFilesCreatedByJobUid()
+	if wdrvUploadErr != nil {
+		fmt.Fprintf(services.MultiLogWriter, "error in wdrv-uid-upload: %v\n", wdrvUploadErr)
+	}
+
 	if err := services.VerboseResourceReport(); err != nil {
 		fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
 	}
@@ -188,7 +193,7 @@ func cmdFinalize() {
 		fmt.Fprintf(services.MultiLogWriter, "error updating status to MAPPING_OUTPUTS: %v\n", err)
 	}
 
-	if exitCode == 0 && postProcessErr == nil {
+	if exitCode == 0 && postProcessErr == nil && wdrvUploadErr == nil {
 		if err := services.UpdateJobStatus("DONE"); err != nil {
 			fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v\n", err)
 		}
