@@ -168,7 +168,7 @@ func cmdFinalize() {
 
 	exitCodeRaw, err := os.ReadFile(services.JobExitCodePath)
 	if err == nil {
-		if n, err := strconv.Atoi(string(exitCodeRaw)); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(exitCodeRaw))); err == nil {
 			exitCode = n
 		}
 	}
