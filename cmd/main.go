@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -66,6 +67,8 @@ func cmdRun(command string) {
 			fmt.Fprintf(services.MultiLogWriter, "error writing exit code: %v\n", err)
 		}
 
+		cancel()
+		services.RemoteLogSink.Wait()
 		services.RemoteLogSink.FinalFlush()
 
 		counterStr := strconv.Itoa(services.GetLogCounter()) + "\n"
@@ -148,10 +151,16 @@ func cmdRun(command string) {
 		} else {
 			exitCode = 1
 		}
+		if reportErr := services.VerboseResourceReport(); reportErr != nil {
+			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", reportErr)
+		}
 		return
 	}
 
 	exitCode = 0
+	if reportErr := services.VerboseResourceReport(); reportErr != nil {
+		fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", reportErr)
+	}
 }
 
 func cmdFinalize() {
@@ -166,7 +175,8 @@ func cmdFinalize() {
 
 	counterRaw, err := os.ReadFile(services.LogCounterPath)
 	if err == nil {
-		if n, err := strconv.Atoi(string(counterRaw)); err == nil {
+		cleaned := strings.TrimSpace(string(counterRaw))
+		if n, err := strconv.Atoi(cleaned); err == nil {
 			services.SetLogCounter(n)
 		}
 	}
@@ -175,18 +185,21 @@ func cmdFinalize() {
 	defer cancel()
 	services.Init(ctx, cancel)
 
+	defer func() {
+		counterStr := strconv.Itoa(services.GetLogCounter()) + "\n"
+		if err := os.WriteFile(services.LogCounterPath, []byte(counterStr), 0644); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error writing final log counter: %v\n", err)
+		}
+	}()
+
 	postProcessErr := services.PostProcessMappings()
 	if postProcessErr != nil {
 		fmt.Fprintf(services.MultiLogWriter, "error in post-process-mappings: %v\n", postProcessErr)
 	}
 
-	wdrvUploadErr := services.UploadWdrvFilesCreatedByJobUid()
+	wdrvUploadErr := services.UploadWdrvFilesCreatedByJobGid()
 	if wdrvUploadErr != nil {
-		fmt.Fprintf(services.MultiLogWriter, "error in wdrv-uid-upload: %v\n", wdrvUploadErr)
-	}
-
-	if err := services.VerboseResourceReport(); err != nil {
-		fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", err)
+		fmt.Fprintf(services.MultiLogWriter, "error in wdrv-gid-upload: %v\n", wdrvUploadErr)
 	}
 
 	if err := services.UpdateJobStatus("MAPPING_OUTPUTS"); err != nil {

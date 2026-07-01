@@ -3,7 +3,7 @@ package services
 import (
 	"fmt"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +11,27 @@ import (
 
 // You must have this defined somewhere in your package:
 // var MultiLogWriter io.Writer
+
+func getDirSize(path string) (uint64, error) {
+	var size int64
+	err := filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			size += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return uint64(size), nil
+}
 
 func bytesToGB(b uint64) float64 {
 	return float64(b) / (1024 * 1024 * 1024)
@@ -143,13 +164,10 @@ func VerboseResourceReport() error {
 	}
 
 	// ------------------ Disk Usage -------------------
-	cmd := exec.Command("du", "-sb", ".")
-	output, err := cmd.Output()
+	diskUsageBytes, err := getDirSize("/mnt/tmp")
 	if err != nil {
-		return fmt.Errorf("failed to execute du: %v", err)
+		return fmt.Errorf("failed to get /mnt/tmp size: %v", err)
 	}
-	duFields := strings.Fields(string(output))
-	diskUsageBytes, _ := strconv.ParseUint(duFields[0], 10, 64)
 
 	// ------------------ Print Report -------------------
 	w := MultiLogWriter

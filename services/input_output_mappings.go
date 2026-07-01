@@ -246,133 +246,87 @@ func remotePush(source, destination string) error {
 	return nil
 }
 
-func mergeDirectory(srcDir, destDir string) error {
-	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(srcDir, path)
-		if err != nil {
-			return err
-		}
-
-		targetPath := filepath.Join(destDir, relPath)
-
-		if d.IsDir() {
-			return os.MkdirAll(targetPath, 0775)
-		}
-
-		// Check if it already exists in the target mount directory
-		if _, err := os.Stat(targetPath); err == nil {
-			// Exists at mount, preserve it (skip copying)
-			return nil
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-
-		// Copy file content using ReadFile/WriteFile
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(targetPath, data, 0664)
-	})
-}
-
 func inputMappingFromMountedStorage(source, destination string) error {
+	sourceInfo, err := os.Lstat(source)
+	sourceIsDir := false
 
-	if _, err := os.Stat(source); os.IsNotExist(err) {
-
-		if strings.HasSuffix(source, "/") {
-
-			err := os.MkdirAll(source, 0775)
-			if err != nil {
-				return fmt.Errorf("error: creating directory for data mapping from mounted storage '%s': %w", source, err)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if strings.HasSuffix(source, "/") {
+				if err := os.MkdirAll(source, 0775); err != nil {
+					return fmt.Errorf("error: creating directory for data mapping from mounted storage '%s': %w", source, err)
+				}
+				sourceIsDir = true
+			} else {
+				return fmt.Errorf("error: file for data mounting from mounted storage does not exists: %s", source)
 			}
 		} else {
-
-			return fmt.Errorf("error: file for data mounting from mounted storage does not exists: %s", source)
+			return fmt.Errorf("error: checking source '%s': %w", source, err)
 		}
-
-	}
-
-	// Clean destination path
-	destination = strings.TrimRight(destination, "/")
-
-	// Ensure destination's parent directory exists
-	if err := os.MkdirAll(filepath.Dir(destination), 0775); err != nil {
-		return fmt.Errorf("error creating parent directory: %v", err)
-	}
-
-	// Check if destination exists
-	if info, err := os.Lstat(destination); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			// It is a symlink. Check where it points.
-			target, err := os.Readlink(destination)
+	} else {
+		if sourceInfo.Mode()&os.ModeSymlink != 0 {
+			statInfo, err := os.Stat(source)
 			if err != nil {
-				return fmt.Errorf("error reading existing symlink '%s': %v", destination, err)
+				return fmt.Errorf("error: stat of symlink source '%s': %w", source, err)
 			}
-			if target == source {
-				// Already correctly mapped
+			sourceIsDir = statInfo.IsDir()
+		} else {
+			sourceIsDir = sourceInfo.IsDir()
+		}
+	}
+
+	destEndsWithSlash := strings.HasSuffix(destination, "/")
+
+	if sourceIsDir && !destEndsWithSlash {
+		return fmt.Errorf("error: cannot map directory '%s' to a file path '%s'", source, destination)
+	}
+
+	var target string
+	if !sourceIsDir && destEndsWithSlash {
+		if err := os.MkdirAll(destination, 0775); err != nil {
+			return fmt.Errorf("error: creating directory '%s': %w", destination, err)
+		}
+		target = filepath.Join(destination, filepath.Base(source))
+	} else {
+		target = strings.TrimRight(destination, "/")
+	}
+
+	if info, err := os.Lstat(target); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			existingTarget, err := os.Readlink(target)
+			if err != nil {
+				return fmt.Errorf("error: reading existing symlink '%s': %w", target, err)
+			}
+			if existingTarget == source {
 				return nil
 			}
-			// Points to a different source, delete it so we can re-create it
-			if err := os.Remove(destination); err != nil {
-				return fmt.Errorf("error removing existing symlink '%s' pointing to '%s': %v", destination, target, err)
+			if err := os.Remove(target); err != nil {
+				return fmt.Errorf("error: removing existing symlink '%s': %w", target, err)
 			}
 		} else if info.IsDir() {
-			// Recursively copy/merge files to the source directory
-			if err := mergeDirectory(destination, source); err != nil {
-				return fmt.Errorf("error merging pre-existing directory '%s' to '%s': %v", destination, source, err)
-			}
-			// Safe to delete local files now that they have been merged
-			if err := os.RemoveAll(destination); err != nil {
-				return fmt.Errorf("error removing merged directory '%s': %v", destination, err)
+			if err := os.RemoveAll(target); err != nil {
+				return fmt.Errorf("error: removing existing directory '%s': %w", target, err)
 			}
 		} else {
-			// It is a regular file. Merge it to the source.
-			sourceInfo, err := os.Stat(source)
-			if err != nil {
-				return fmt.Errorf("error checking source '%s': %v", source, err)
-			}
-			var targetPath string
-			if sourceInfo.IsDir() {
-				targetPath = filepath.Join(source, filepath.Base(destination))
-			} else {
-				targetPath = source
-			}
-
-			// Copy if it doesn't exist on the mount
-			if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-				data, err := os.ReadFile(destination)
-				if err != nil {
-					return fmt.Errorf("error reading conflicting file '%s': %v", destination, err)
-				}
-				if err := os.WriteFile(targetPath, data, 0664); err != nil {
-					return fmt.Errorf("error merging conflicting file to '%s': %v", targetPath, err)
-				}
-			}
-
-			// Remove original conflicting file
-			if err := os.Remove(destination); err != nil {
-				return fmt.Errorf("error removing conflicting file '%s': %v", destination, err)
-			}
+			return fmt.Errorf("error: existing file '%s' conflicts with mapping", target)
 		}
 	} else if !os.IsNotExist(err) {
-		// Some other error accessing destination
-		return fmt.Errorf("error checking destination '%s': %v", destination, err)
+		if os.IsPermission(err) {
+			return fmt.Errorf("error: permission denied accessing '%s'", target)
+		}
+		return fmt.Errorf("error: checking target '%s': %w", target, err)
 	}
 
-	// Create the symlink
-	if err := os.Symlink(source, destination); err != nil {
-		return fmt.Errorf("error creating symlink: %v", err)
+	if err := os.MkdirAll(filepath.Dir(target), 0775); err != nil {
+		return fmt.Errorf("error: creating parent directory for '%s': %w", target, err)
 	}
 
-	// Check for symlink loop
-	if _, err := filepath.EvalSymlinks(destination); err != nil {
-		// Remove the symlink if a loop is detected
-		_ = os.Remove(destination)
+	if err := os.Symlink(source, target); err != nil {
+		return fmt.Errorf("error: creating symlink from '%s' to '%s': %w", source, target, err)
+	}
+
+	if _, err := filepath.EvalSymlinks(target); err != nil {
+		_ = os.Remove(target)
 		if strings.Contains(err.Error(), "too many links") {
 			return fmt.Errorf("symlink loop detected: %v", err)
 		}
@@ -832,6 +786,8 @@ func RemotePushLog(source, destination, projectSlug string) error {
 		string(filesJSON),
 	}
 
+
+
 	fmt.Fprintf(MultiLogWriter, "Uploading %d log files via hf_xet...\n", len(uploadList))
 	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
 	defer cancel()
@@ -842,14 +798,14 @@ func RemotePushLog(source, destination, projectSlug string) error {
 	return nil
 }
 
-func UploadWdrvFilesCreatedByJobUid() error {
-	jobUidStr := os.Getenv("JOB_UID")
-	if jobUidStr == "" {
-		return nil // No JOB_UID set, skip
+func UploadWdrvFilesCreatedByJobGid() error {
+	jobGidStr := os.Getenv("JOB_GID")
+	if jobGidStr == "" {
+		return nil // No JOB_GID set, skip
 	}
-	jobUid, err := strconv.ParseUint(jobUidStr, 10, 32)
+	jobGid, err := strconv.ParseUint(jobGidStr, 10, 32)
 	if err != nil {
-		return fmt.Errorf("invalid JOB_UID %s: %v", jobUidStr, err)
+		return fmt.Errorf("invalid JOB_GID %s: %v", jobGidStr, err)
 	}
 
 	projectSlug := GetProjectSlug()
@@ -877,7 +833,7 @@ func UploadWdrvFilesCreatedByJobUid() error {
 			return nil
 		}
 
-		if stat.Uid == uint32(jobUid) {
+		if stat.Gid == uint32(jobGid) {
 			relPath, err := filepath.Rel("/mnt/wdrv", path)
 			if err != nil {
 				return err
@@ -900,7 +856,7 @@ func UploadWdrvFilesCreatedByJobUid() error {
 	}
 
 	if len(uploadList) == 0 {
-		fmt.Fprintln(MultiLogWriter, "No files created by JOB_UID found in /mnt/wdrv to upload.")
+		fmt.Fprintln(MultiLogWriter, "No files created by JOB_GID found in /mnt/wdrv to upload.")
 		return nil
 	}
 
@@ -928,7 +884,7 @@ func UploadWdrvFilesCreatedByJobUid() error {
 		string(filesJSON),
 	}
 
-	fmt.Fprintf(MultiLogWriter, "Uploading %d files created by JOB_UID from /mnt/wdrv via hf_xet...\n", len(uploadList))
+	fmt.Fprintf(MultiLogWriter, "Uploading %d files created by JOB_GID from /mnt/wdrv via hf_xet...\n", len(uploadList))
 	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
 	defer cancel()
 	if err := RunHelperCommand(ctx, args); err != nil {

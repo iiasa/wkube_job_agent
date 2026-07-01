@@ -97,7 +97,7 @@ func sendSuccess(conn net.Conn, result bool) {
 
 // StartIPCServer starts a Unix domain socket server listening for local requests from the child process.
 func StartIPCServer(ctx context.Context) {
-	socketPath := "/tmp/wagt.sock"
+	socketPath := "/mnt/tmp/.wkube_agent/wagt.sock"
 
 	// Cleanup existing stale socket file
 	_ = os.Remove(socketPath)
