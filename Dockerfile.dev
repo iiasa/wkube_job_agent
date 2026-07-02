@@ -24,9 +24,27 @@ RUN mkdir -p /agent/xet_python && \
     /agent/xet_python/bin/python3 -m pip install --upgrade pip && \
     /agent/xet_python/bin/python3 -m pip install hf_xet
 
+# Bundle glibc runtime libraries so python3 works on any base image (including musl/Alpine).
+# The bundled ld-linux loader invokes python3.10 with --library-path pointing to the bundled lib/.
+RUN cp -L /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 \
+         /lib/x86_64-linux-gnu/libc.so.6 \
+         /lib/x86_64-linux-gnu/libpthread.so.0 \
+         /lib/x86_64-linux-gnu/libdl.so.2 \
+         /lib/x86_64-linux-gnu/libutil.so.1 \
+         /lib/x86_64-linux-gnu/libm.so.6 \
+         /lib/x86_64-linux-gnu/librt.so.1 \
+         /lib/x86_64-linux-gnu/libgcc_s.so.1 \
+         /lib/x86_64-linux-gnu/libnss_files.so.2 \
+         /lib/x86_64-linux-gnu/libnss_dns.so.2 \
+         /lib/x86_64-linux-gnu/libresolv.so.2 \
+         /agent/xet_python/lib/ && \
+    rm -f /agent/xet_python/bin/python3 && \
+    printf '#!/bin/sh\nD="${0%%/*}"\nexec "${D}/../lib/ld-linux-x86-64.so.2" --library-path "${D}/../lib" "${D}/python3.10" "$@"\n' > /agent/xet_python/bin/python3 && \
+    chmod +x /agent/xet_python/bin/python3
+
 FROM alpine:3.19
 
-# Install ca-certificates in the final alpine image
+# Install ca-certificates (needed by the bundled CA certs)
 RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /app/wagt /agent/wagt

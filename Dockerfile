@@ -8,38 +8,47 @@ COPY . .
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
 RUN go build -o wagt ./cmd/main.go
 
-FROM alpine:3.19 AS python-builder
+FROM debian:bookworm-slim AS python-builder
 
-# Install dependencies needed during compilation
-RUN apk add --no-cache \
+# Install dependencies needed during download/bootstrap
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ca-certificates \
     tar \
     gzip \
-    patchelf \
-    binutils \
-    build-base \
-    python3 \
-    python3-dev \
-    py3-pip \
-    musl-dev \
-    scons
+    && rm -rf /var/lib/apt/lists/*
 
-# Install pyinstaller, staticx, and hf_xet
-RUN pip3 install --break-system-packages hf_xet==1.4.3 pyinstaller wheel
-RUN pip3 install --break-system-packages --no-build-isolation staticx
+# Download, extract, and bootstrap Astral standalone Python + hf_xet
+RUN mkdir -p /agent/xet_python && \
+    curl -sSL https://github.com/astral-sh/python-build-standalone/releases/download/20240107/cpython-3.10.13+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz | tar -xz -C /agent/xet_python --strip-components=1 && \
+    /agent/xet_python/bin/python3 -m pip install --upgrade pip && \
+    /agent/xet_python/bin/python3 -m pip install hf_xet==1.4.3
 
-# Compile python helper to static binary
-COPY ./cmd/hf_xet_helper.py /agent/hf_xet_helper.py
-RUN pyinstaller --onefile --clean --workpath /tmp/pyinstaller --distpath /tmp/dist /agent/hf_xet_helper.py
-RUN staticx /tmp/dist/hf_xet_helper /agent/hf_xet_helper
+# Bundle glibc runtime libraries so python3 works on any base image (including musl/Alpine).
+# The bundled ld-linux loader invokes python3.10 with --library-path pointing to the bundled lib/.
+RUN cp -L /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 \
+         /lib/x86_64-linux-gnu/libc.so.6 \
+         /lib/x86_64-linux-gnu/libpthread.so.0 \
+         /lib/x86_64-linux-gnu/libdl.so.2 \
+         /lib/x86_64-linux-gnu/libutil.so.1 \
+         /lib/x86_64-linux-gnu/libm.so.6 \
+         /lib/x86_64-linux-gnu/librt.so.1 \
+         /lib/x86_64-linux-gnu/libgcc_s.so.1 \
+         /lib/x86_64-linux-gnu/libnss_files.so.2 \
+         /lib/x86_64-linux-gnu/libnss_dns.so.2 \
+         /lib/x86_64-linux-gnu/libresolv.so.2 \
+         /agent/xet_python/lib/ && \
+    rm -f /agent/xet_python/bin/python3 && \
+    printf '#!/bin/sh\nD="${0%%/*}"\nexec "${D}/../lib/ld-linux-x86-64.so.2" --library-path "${D}/../lib" "${D}/python3.10" "$@"\n' > /agent/xet_python/bin/python3 && \
+    chmod +x /agent/xet_python/bin/python3
 
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates
-
 COPY --from=builder /app/wagt /agent/wagt
 COPY ./bin/ssh /agent/ssh
-COPY --from=python-builder /agent/hf_xet_helper /agent/hf_xet_helper
+COPY --from=python-builder /agent/xet_python /agent/xet_python
+
+RUN chmod -R +x /agent/wagt /agent/ssh /agent/xet_python/bin/
 
 COPY <<EOF /agent/backend_dev.crt
 -----BEGIN CERTIFICATE-----
@@ -116,17 +125,7 @@ RUN cat /etc/ssl/certs/ca-certificates.crt \
         /agent/s3_iiasa.crt \
     > /agent/ca_bundle.pem
 
-# Add our custom CAs to the system cert store so that rustls-platform-verifier
-# (used by hf_xet's reqwest) can load them from /etc/ssl/cert.pem at runtime.
-RUN cp /agent/backend_dev.crt /usr/local/share/ca-certificates/backend_dev.crt && \
-    cp /agent/s3_dev.crt /usr/local/share/ca-certificates/s3_dev.crt && \
-    cp /agent/s3_iiasa.crt /usr/local/share/ca-certificates/s3_iiasa.crt && \
-    update-ca-certificates
+RUN chmod -R a+rX /agent && chown -R 65534:65534 /agent
 
-RUN chmod -R +x /agent/wagt /agent/ssh /agent/hf_xet_helper
-RUN chmod -R a+rX /agent && chown -R 65534:65534 /agent 
-RUN mkdir -p /.cache && chmod -R a+rX /.cache && chown -R 65534:65534 /.cache
-
-# RUN chmod -R g+rwX / && chown -R :65534 /
-
-ENTRYPOINT ["sh", "-c", "mkdir -p /mnt/tmp/.wkube_agent && cp -r /agent/* /mnt/tmp/.wkube_agent/"]
+# Recursively copy all bundled agent executables and python virtual environment to the shared volume
+ENTRYPOINT ["sh", "-c", "mkdir -p /mnt/tmp/.wkube_agent && cp -rp /agent/* /mnt/tmp/.wkube_agent/"]
