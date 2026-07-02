@@ -838,7 +838,7 @@ func UploadWdrvFilesCreatedByJobGid() error {
 			if err != nil {
 				return err
 			}
-			destPath := filepath.Join(projectSlug, relPath)
+			destPath := relPath
 			destPath = strings.TrimRight(destPath, string(os.PathSeparator))
 
 			uploadList = append(uploadList, uploadFileInfo{
