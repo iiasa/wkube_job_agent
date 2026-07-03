@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 const HfXetHelperScript = `import sys
@@ -38,7 +39,7 @@ class TokenRefresher:
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.settimeout(30)
-            s.connect("/mnt/tmp/.wkube_agent/wagt.sock")
+            s.connect("__WAGT_SOCK__")
             payload = json.dumps({"action": "get-access-token"}).encode("utf-8")
             s.sendall(payload)
             s.shutdown(socket.SHUT_WR)
@@ -199,7 +200,8 @@ func WriteHelperScript() error {
 		return fmt.Errorf("failed to create runtime dir: %w", err)
 	}
 	destPath := filepath.Join(destDir, "hf_xet_helper.py")
-	return os.WriteFile(destPath, []byte(HfXetHelperScript), 0644)
+	script := strings.Replace(HfXetHelperScript, "__WAGT_SOCK__", WagtSocketPath, 1)
+	return os.WriteFile(destPath, []byte(script), 0644)
 }
 
 // GetPythonInterpreter resolves the best python interpreter path pre-built in the container.

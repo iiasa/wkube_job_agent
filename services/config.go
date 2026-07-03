@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -22,9 +23,18 @@ var (
 	LogFileName         string
 	RootCtx             context.Context
 
-	JobLogPath     = getenvWithDefault("WAGT_JOB_LOG_PATH", "/mnt/tmp/.wkube_agent/job.log")
-	JobExitCodePath = getenvWithDefault("WAGT_EXIT_CODE_PATH", "/mnt/tmp/.wkube_agent/exit_code")
-	LogCounterPath = getenvWithDefault("WAGT_LOG_COUNTER_PATH", "/mnt/tmp/.wkube_agent/log_counter")
+	podID = func() string {
+		if id := os.Getenv("POD_ID"); id != "" {
+			return id
+		}
+		return "unknown"
+	}()
+
+	JobLogPath     = getenvWithDefault("WAGT_JOB_LOG_PATH", "/mnt/tmp/.wkube_agent/"+podID+"/job.log")
+	JobExitCodePath = getenvWithDefault("WAGT_EXIT_CODE_PATH", "/mnt/tmp/.wkube_agent/"+podID+"/exit_code")
+	LogCounterPath = getenvWithDefault("WAGT_LOG_COUNTER_PATH", "/mnt/tmp/.wkube_agent/"+podID+"/log_counter")
+	WagtSocketPath       = "/mnt/tmp/.wkube_agent/" + podID + "/wagt.sock"
+	PostWagtTaskRegistry = "/mnt/tmp/.wkube_agent/" + podID + "/post_task_registry.json"
 )
 
 type RetryTransport struct {
@@ -111,12 +121,11 @@ func Init(ctx context.Context, cancel context.CancelFunc) {
 		},
 	}
 
-	podID := os.Getenv("POD_ID")
-	if podID == "" {
-		podID = "unknown" // fallback if POD_ID is not set
-	}
-
 	LogFileName = fmt.Sprintf("logs/full/job-%s.log", podID)
+
+	if err := os.MkdirAll(filepath.Dir(JobLogPath), 0755); err != nil {
+		panic("failed to create log directory: " + err.Error())
+	}
 
 	logFile, err := os.OpenFile(JobLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {

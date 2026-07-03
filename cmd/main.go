@@ -202,8 +202,13 @@ func cmdFinalize() {
 		fmt.Fprintf(services.MultiLogWriter, "error in wdrv-gid-upload: %v\n", wdrvUploadErr)
 	}
 
+
 	if err := services.UpdateJobStatus("MAPPING_OUTPUTS"); err != nil {
 		fmt.Fprintf(services.MultiLogWriter, "error updating status to MAPPING_OUTPUTS: %v\n", err)
+	}
+
+	if err := services.ExecutePostTaskRegistry(); err != nil {
+		fmt.Fprintf(services.MultiLogWriter, "error executing post task registry: %v\n", err)
 	}
 
 	if exitCode == 0 && postProcessErr == nil && wdrvUploadErr == nil {
