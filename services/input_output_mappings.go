@@ -247,6 +247,52 @@ func remotePush(source, destination string) error {
 }
 
 func inputMappingFromMountedStorage(source, destination string) error {
+	if strings.ContainsAny(source, "*?[]") {
+		if !strings.HasSuffix(destination, "/") {
+			return fmt.Errorf("error: wildcard source mapping requires a directory destination ending with '/' (got '%s')", destination)
+		}
+
+		cleanedSource := filepath.Clean(source)
+		if !strings.HasPrefix(cleanedSource, "/mnt/tmp") && !strings.HasPrefix(cleanedSource, "/mnt/wdrv") {
+			return fmt.Errorf("error: security violation, wildcard source '%s' (cleaned: '%s') is outside allowed mounts", source, cleanedSource)
+		}
+
+		matches, err := filepath.Glob(source)
+		if err != nil {
+			return fmt.Errorf("error expanding wildcard source '%s': %w", source, err)
+		}
+
+		if len(matches) == 0 {
+			fmt.Fprintf(MultiLogWriter, "warning: wildcard source '%s' matched no files\n", source)
+			return nil
+		}
+
+		for _, match := range matches {
+			matchInfo, err := os.Lstat(match)
+			if err != nil {
+				return fmt.Errorf("error checking match '%s': %w", match, err)
+			}
+			isDir := matchInfo.IsDir()
+			if matchInfo.Mode()&os.ModeSymlink != 0 {
+				if statInfo, err := os.Stat(match); err == nil {
+					isDir = statInfo.IsDir()
+				}
+			}
+
+			var matchDest string
+			if isDir {
+				matchDest = filepath.Join(destination, filepath.Base(match)) + "/"
+			} else {
+				matchDest = filepath.Join(destination, filepath.Base(match))
+			}
+
+			if err := inputMappingFromMountedStorage(match, matchDest); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	sourceInfo, err := os.Lstat(source)
 	sourceIsDir := false
 
