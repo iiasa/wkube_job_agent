@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -20,6 +21,62 @@ func abortIfCancelled(ctx context.Context, where string) error {
 		return fmt.Errorf("context cancelled during %s — aborting", where)
 	}
 	return nil
+}
+
+func isMountPoint(path string) bool {
+	stat, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	parentStat, err := os.Lstat(filepath.Dir(path))
+	if err != nil {
+		return false
+	}
+	
+	statDev := stat.Sys().(*syscall.Stat_t).Dev
+	parentDev := parentStat.Sys().(*syscall.Stat_t).Dev
+	
+	return statDev != parentDev
+}
+
+func waitForMount(ctx context.Context) error {
+	jobID := os.Getenv("JOB_ID")
+	probeFile := filepath.Join("/mnt/wdrv", fmt.Sprintf(".wagt_init_probe_%s", jobID))
+
+	fmt.Fprintln(services.MultiLogWriter, "Waiting for FUSE mount on /mnt/wdrv to become ready...")
+
+	// Create a cleanup function for the probe file
+	cleanup := func() {
+		_ = os.Remove(probeFile)
+	}
+	defer cleanup()
+
+	for i := 1; i <= 180; i++ {
+		// First check if it's a mountpoint using pure Go device ID comparison
+		if isMountPoint("/mnt/wdrv") {
+			// Try writing to the probe file
+			err := os.WriteFile(probeFile, []byte("wagt-probe-ok"), 0644)
+			if err == nil {
+				// Try reading it back
+				data, err := os.ReadFile(probeFile)
+				if err == nil && string(data) == "wagt-probe-ok" {
+					fmt.Fprintf(services.MultiLogWriter, "FUSE mount /mnt/wdrv is ready and I/O works (attempt %d/180)\n", i)
+					return nil
+				}
+			}
+			fmt.Fprintf(services.MultiLogWriter, "  attempt %d/180: /mnt/wdrv is mounted but I/O probe failed (FUSE not ready yet), sleeping 5s...\n", i)
+		} else {
+			fmt.Fprintf(services.MultiLogWriter, "  attempt %d/180: /mnt/wdrv is not a mountpoint yet, sleeping 5s...\n", i)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+
+	return fmt.Errorf("FATAL: FUSE mount /mnt/wdrv did not become I/O-ready within 900s (15 minutes)")
 }
 
 func cmdRun(command string) {
@@ -90,6 +147,14 @@ func cmdRun(command string) {
 		fmt.Fprintf(services.MultiLogWriter, "error updating status to MAPPING_INPUTS: %v\n", err)
 		exitCode = 1
 		return
+	}
+
+	if os.Getenv("WAIT_FOR_HF_MOUNT") == "true" {
+		if err := waitForMount(ctx); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
+			exitCode = 1
+			return
+		}
 	}
 
 	if err := services.PreProcessMappings(); err != nil {
