@@ -250,6 +250,14 @@ func cmdFinalize() {
 	defer cancel()
 	services.Init(ctx, cancel)
 
+	if os.Getenv("WAIT_FOR_HF_MOUNT") == "true" {
+		if err := waitForMount(ctx); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
+			services.RemoteLogSink.FinalFlush()
+			os.Exit(1)
+		}
+	}
+
 	defer func() {
 		counterStr := strconv.Itoa(services.GetLogCounter()) + "\n"
 		if err := os.WriteFile(services.LogCounterPath, []byte(counterStr), 0644); err != nil {
