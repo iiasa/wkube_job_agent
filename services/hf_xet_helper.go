@@ -109,7 +109,14 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
     import hf_xet
     files_list = json.loads(files_json)
     local_paths = [f["local_path"] for f in files_list]
-    
+
+    # Compute sha256 for every file BEFORE uploading so the hash is guaranteed
+    # to match the bytes that will be read by upload_files.  Computing it after
+    # upload creates a race: if the file is modified between the two reads the
+    # registered sha256 would describe a different version than the uploaded CAS
+    # content, producing a corrupted registration.
+    pre_upload_sha256 = {f["local_path"]: compute_sha256(f["local_path"]) for f in files_list}
+
     refresher = TokenRefresher(cas_token, expires_at)
 
     upload_results = hf_xet.upload_files(
@@ -123,14 +130,19 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
         sha256s=None,
         skip_sha256=False
     )
-    
+
+    if len(upload_results) != len(files_list):
+        raise RuntimeError(
+            f"hf_xet.upload_files returned {len(upload_results)} results for "
+            f"{len(files_list)} input files — cannot safely pair files with results"
+        )
+
     registration_items = []
     for f, upload_info in zip(files_list, upload_results):
-        sha256_hash = compute_sha256(f["local_path"])
         registration_items.append({
             "filename": f"{project_slug}/{f['remote_path']}",
             "merkle_hash": upload_info.hash,
-            "sha256": sha256_hash,
+            "sha256": pre_upload_sha256[f["local_path"]],
             "file_size": upload_info.file_size,
             "content_type": "application/octet-stream"
         })
