@@ -741,27 +741,27 @@ func SendBatch(lines []byte, logFilename string, cancel context.CancelFunc) erro
 	return nil
 }
 
-func CheckHealth(cancel context.CancelFunc) error {
+func CheckHealth(cancel context.CancelFunc) (bool, error) {
 	endpoint := "/is-healthy/"
 	req, err := CreateRequest("GET", endpoint, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	resp, err := HTTPClientWithRetry.Do(req)
 	if err != nil {
-		return fmt.Errorf("error checking health: %v", err)
+		return false, fmt.Errorf("error checking health: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		err := HandleHTTPError(resp)
-		return fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
+		return false, fmt.Errorf("GET %s returned not okay status %v", endpoint, err)
 	}
 
 	var healthCheckResponse HealthCheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&healthCheckResponse); err != nil {
-		return fmt.Errorf("error decoding health check response: %v", err)
+		return false, fmt.Errorf("error decoding health check response: %v", err)
 	}
 
 	if !healthCheckResponse.IsHealthy {
@@ -781,7 +781,7 @@ func CheckHealth(cancel context.CancelFunc) error {
 		}
 	}
 
-	return nil
+	return healthCheckResponse.IsHealthy, nil
 }
 
 type RegisterValidationPayload struct {

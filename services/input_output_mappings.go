@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -859,6 +860,16 @@ func UploadWdrvFilesCreatedByJobGid() error {
 		return fmt.Errorf("project_slug is empty")
 	}
 
+	// Check if the job itself is healthy first.
+	// If it is unhealthy, the FUSE mount (/mnt/wdrv) might be hung/broken.
+	// In that case, check if the mount is responsive, and skip walk if not.
+	if healthy, err := CheckHealth(nil); err == nil && !healthy {
+		if !isWdrvResponsive() {
+			fmt.Fprintln(MultiLogWriter, "warning: job is unhealthy and /mnt/wdrv is not responsive, skipping walk to avoid hang")
+			return nil
+		}
+	}
+
 	var uploadList []uploadFileInfo
 
 	err = filepath.WalkDir("/mnt/wdrv", func(path string, d os.DirEntry, err error) error {
@@ -947,5 +958,18 @@ func UploadWdrvFilesCreatedByJobGid() error {
 	}
 
 	return nil
+}
+
+
+
+func isWdrvResponsive() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "ls", "/mnt/wdrv")
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return true
 }
 

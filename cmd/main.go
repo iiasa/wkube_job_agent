@@ -248,7 +248,10 @@ func cmdFinalize() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	services.Init(ctx, cancel)
+	// Pass a dummy cancel function to services.Init in order to NOT cancel the finalizer context on health check failure.
+	services.Init(ctx, func() {
+		fmt.Fprintf(services.MultiLogWriter, "Health check failed: job is not healthy\n")
+	})
 
 	if os.Getenv("WAIT_FOR_HF_MOUNT") == "true" {
 		if err := waitForMount(ctx); err != nil {

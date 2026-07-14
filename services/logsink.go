@@ -83,7 +83,7 @@ DrainLoop:
 	dropped := rl.getAndResetDroppedCount()
 
 	if len(batch) == 0 && dropped == 0 {
-		if err := CheckHealth(cancel); err != nil {
+		if _, err := CheckHealth(cancel); err != nil {
 			fmt.Fprintf(MultiLogWriter, "error in health check function: %v\n", err)
 		}
 		return
