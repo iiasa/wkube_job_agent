@@ -636,6 +636,42 @@ func postProcessOutputMappings(outputMappings []string) ([]func() error, error) 
 	return taskQueue, nil
 }
 
+// InvalidateFUSECacheForPath triggers directory invalidation in FUSE by attempting a rename of a nonexistent file.
+// Walk up the path hierarchy to '/mnt/wdrv' and rename inside each directory to clear FUSE's in-memory cache.
+func InvalidateFUSECacheForPath(path string) {
+	if !strings.HasPrefix(path, "/mnt/wdrv") {
+		return
+	}
+
+	var dir string
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		dir = path
+	} else {
+		dir = filepath.Dir(path)
+	}
+
+	dir = filepath.Clean(dir)
+	if !strings.HasPrefix(dir, "/mnt/wdrv") {
+		return
+	}
+
+	for {
+		oldPath := filepath.Join(dir, "__wagt_refresh_trigger__")
+		newPath := filepath.Join(dir, "__wagt_refresh_trigger_dest__")
+		_ = os.Rename(oldPath, newPath)
+
+		if dir == "/mnt/wdrv" || dir == "/" || dir == "." {
+			break
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+}
+
 func PreProcessMappings() error {
 
 	fmt.Fprintln(MultiLogWriter, "Pre process input/output mappings started")
@@ -647,6 +683,36 @@ func PreProcessMappings() error {
 
 	allInputMappings := strings.Split(inputMappings, ";")
 	allOutputMappings := strings.Split(outputMappings, ";")
+
+	// Invalidate FUSE cache for all mapped /mnt/wdrv paths to ensure freshness of directories/files
+	for _, mapping := range allInputMappings {
+		mapping = strings.TrimSpace(mapping)
+		if mapping == "" {
+			continue
+		}
+		parts := strings.Split(mapping, ":")
+		if len(parts) == 2 {
+			source := parts[0]
+			if strings.HasPrefix(source, "/mnt/wdrv") {
+				InvalidateFUSECacheForPath(source)
+			}
+		}
+	}
+	for _, mapping := range allOutputMappings {
+		mapping = strings.TrimSpace(mapping)
+		if mapping == "" {
+			continue
+		}
+		parts := strings.Split(mapping, ":")
+		if len(parts) == 2 {
+			destination := parts[1]
+			if strings.HasPrefix(destination, "/mnt/wdrv") {
+				InvalidateFUSECacheForPath(destination)
+			}
+		}
+	}
+	// Also invalidate the root directory just in case
+	InvalidateFUSECacheForPath("/mnt/wdrv")
 
 	taskQueue, symlinkQueueFromInputMapping, err := processInputMappings(allInputMappings)
 
