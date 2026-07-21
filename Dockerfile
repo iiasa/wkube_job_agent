@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /agent/xet_python && \
     curl -sSL https://github.com/astral-sh/python-build-standalone/releases/download/20240107/cpython-3.10.13+20240107-x86_64-unknown-linux-gnu-install_only.tar.gz | tar -xz -C /agent/xet_python --strip-components=1 && \
     /agent/xet_python/bin/python3 -m pip install --upgrade pip && \
-    /agent/xet_python/bin/python3 -m pip install hf_xet==1.4.3
+    /agent/xet_python/bin/python3 -m pip install hf_xet==1.5.2
 
 # Bundle glibc runtime libraries so python3 works on any base image (including musl/Alpine).
 # The bundled ld-linux loader invokes python3.10 with --library-path pointing to the bundled lib/.

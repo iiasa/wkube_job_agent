@@ -72,43 +72,44 @@ def compute_sha256(filepath):
 def do_download(endpoint, cas_token, expires_at, files_json):
     import hf_xet
     files_list = json.loads(files_json)
-    download_infos = []
-    for f in files_list:
-        download_infos.append(
-            hf_xet.PyXetDownloadInfo(
-                destination_path=f["destination_path"],
-                hash=f["hash"],
-                file_size=f["file_size"]
-            )
-        )
     
     refresher = TokenRefresher(cas_token, expires_at)
+    current_token, current_expiry = refresher.refresh()
     
-    print(f"Starting download of {len(download_infos)} files via hf_xet...", file=sys.stderr)
+    print(f"Starting download of {len(files_list)} files via hf_xet...", file=sys.stderr)
     
     total_size = sum(f.get("file_size", 0) for f in files_list)
     
-    def progress_updater(downloaded_bytes):
+    def progress_callback(group_report, item_reports):
+        downloaded_bytes = group_report.total_bytes_completed
         if total_size > 0:
             percent = (downloaded_bytes / total_size) * 100
             print(f"Download progress: {percent:.2f}% ({downloaded_bytes}/{total_size} bytes)", file=sys.stderr)
         else:
             print(f"Download progress: {downloaded_bytes} bytes", file=sys.stderr)
-    
-    hf_xet.download_files(
-        files=download_infos,
+            
+    refresh_url = endpoint.split("/api/")[0] + "/api/v1/oauth/device/cas-token/"
+    refresh_headers = {"Authorization": f"Bearer {current_token}"}
+
+    session = hf_xet.XetSession()
+    with session.new_file_download_group(
         endpoint=endpoint,
-        token_info=(cas_token, expires_at),
-        token_refresher=refresher.refresh,
-        progress_updater=[progress_updater],
-        request_headers=None
-    )
+        token=current_token,
+        token_expiry_unix_secs=current_expiry,
+        token_refresh_url=refresh_url,
+        token_refresh_headers=refresh_headers,
+        progress_callback=progress_callback,
+        progress_interval_ms=100
+    ) as group:
+        for f in files_list:
+            info = hf_xet.XetFileInfo(f["hash"], f["file_size"])
+            group.start_download_file(info, f["destination_path"])
+            
     print("DOWNLOAD_SUCCESS")
 
 def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files_json):
     import hf_xet
     files_list = json.loads(files_json)
-    local_paths = [f["local_path"] for f in files_list]
 
     # Compute sha256 for every file BEFORE uploading so the hash is guaranteed
     # to match the bytes that will be read by upload_files.  Computing it after
@@ -118,32 +119,32 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
     pre_upload_sha256 = {f["local_path"]: compute_sha256(f["local_path"]) for f in files_list}
 
     refresher = TokenRefresher(cas_token, expires_at)
+    current_token, current_expiry = refresher.refresh()
 
-    upload_results = hf_xet.upload_files(
-        file_paths=local_paths,
+    refresh_url = endpoint.split("/api/")[0] + "/api/v1/oauth/device/cas-token/"
+    refresh_headers = {"Authorization": f"Bearer {current_token}"}
+
+    session = hf_xet.XetSession()
+    with session.new_upload_commit(
         endpoint=endpoint,
-        token_info=(cas_token, expires_at),
-        token_refresher=refresher.refresh,
-        progress_updater=None,
-        _repo_type=None,
-        request_headers=None,
-        sha256s=None,
-        skip_sha256=False
-    )
-
-    if len(upload_results) != len(files_list):
-        raise RuntimeError(
-            f"hf_xet.upload_files returned {len(upload_results)} results for "
-            f"{len(files_list)} input files — cannot safely pair files with results"
-        )
-
+        token=current_token,
+        token_expiry_unix_secs=current_expiry,
+        token_refresh_url=refresh_url,
+        token_refresh_headers=refresh_headers,
+    ) as commit:
+        handles = []
+        for f in files_list:
+            h = commit.start_upload_file(f["local_path"], sha256=pre_upload_sha256[f["local_path"]])
+            handles.append((f, h))
+        
     registration_items = []
-    for f, upload_info in zip(files_list, upload_results):
+    for f, h in handles:
+        upload_info = h.result()
         registration_items.append({
             "filename": f"{project_slug}/{f['remote_path']}",
-            "merkle_hash": upload_info.hash,
+            "merkle_hash": upload_info.xet_info.hash,
             "sha256": pre_upload_sha256[f["local_path"]],
-            "file_size": upload_info.file_size,
+            "file_size": upload_info.xet_info.file_size,
             "content_type": "application/octet-stream"
         })
     
