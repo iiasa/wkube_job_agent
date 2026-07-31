@@ -94,6 +94,16 @@ func cmdRun(command string) {
 	go func() {
 		sig := <-sigChan
 		fmt.Fprintf(services.MultiLogWriter, "Received signal: %s — forwarding to child process\n", sig)
+		
+		podID := os.Getenv("POD_ID")
+		if podID == "" {
+			podID = "unknown"
+		}
+		evictedPath := fmt.Sprintf("/mnt/tmp/.wkube_agent/%s/evicted", podID)
+		if err := os.WriteFile(evictedPath, []byte("evicted\n"), 0644); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "warning: could not touch evicted file: %v\n", err)
+		}
+
 		if cmd != nil && cmd.Process != nil {
 			syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		}
@@ -124,6 +134,15 @@ func cmdRun(command string) {
 			fmt.Fprintf(services.MultiLogWriter, "error writing exit code: %v\n", err)
 		}
 
+		podID := os.Getenv("POD_ID")
+		if podID == "" {
+			podID = "unknown"
+		}
+		mainDonePath := fmt.Sprintf("/mnt/tmp/.wkube_agent/%s/main_done", podID)
+		if err := os.WriteFile(mainDonePath, []byte("done\n"), 0644); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "warning: could not touch main_done file: %v\n", err)
+		}
+
 		cancel()
 		services.RemoteLogSink.Wait()
 		services.RemoteLogSink.FinalFlush()
@@ -136,7 +155,15 @@ func cmdRun(command string) {
 		os.Exit(0)
 	}()
 
-	cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	parts := strings.Fields(command)
+	if len(parts) > 0 {
+		cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
+	} else {
+		fmt.Fprintf(services.MultiLogWriter, "Error: empty command string\n")
+		exitCode = 1
+		return
+	}
+	
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
@@ -252,6 +279,14 @@ func cmdFinalize() {
 	services.Init(ctx, func() {
 		fmt.Fprintf(services.MultiLogWriter, "Health check failed: job is not healthy\n")
 	})
+
+	if reason := os.Getenv("WAGT_ABRUPT_TERMINATION"); reason != "" {
+		if reason == "EVICTION" {
+			fmt.Fprintf(services.MultiLogWriter, "[SYSTEM] Job was abruptly terminated due to Eviction (e.g., exceeded ephemeral storage), Timeout, or Node shutdown.\n")
+		} else if reason == "OOM" {
+			fmt.Fprintf(services.MultiLogWriter, "[SYSTEM] Job was abruptly terminated due to Out-of-Memory (OOMKilled).\n")
+		}
+	}
 
 	if os.Getenv("WAIT_FOR_HF_MOUNT") == "true" {
 		if err := waitForMount(ctx); err != nil {
