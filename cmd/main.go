@@ -303,6 +303,10 @@ func cmdFinalize() {
 		}
 	}()
 
+	// Invalidate the FUSE cache for /mnt/wdrv upfront to ensure all subsequent
+	// finalize steps (like UploadWdrvFilesCreatedByJobGid) see the latest files.
+	services.InvalidateFUSECacheForPath("/mnt/wdrv")
+
 	postProcessErr := services.PostProcessMappings()
 	if postProcessErr != nil {
 		fmt.Fprintf(services.MultiLogWriter, "error in post-process-mappings: %v\n", postProcessErr)
