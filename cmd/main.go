@@ -155,13 +155,17 @@ func cmdRun(command string) {
 		os.Exit(0)
 	}()
 
-	parts := strings.Fields(command)
-	if len(parts) > 0 {
-		cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
+	if shellPath, err := exec.LookPath("sh"); err == nil {
+		cmd = exec.CommandContext(ctx, shellPath, "-c", command)
 	} else {
-		fmt.Fprintf(services.MultiLogWriter, "Error: empty command string\n")
-		exitCode = 1
-		return
+		parts := strings.Fields(command)
+		if len(parts) > 0 {
+			cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
+		} else {
+			fmt.Fprintf(services.MultiLogWriter, "Error: empty command string\n")
+			exitCode = 1
+			return
+		}
 	}
 	
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
