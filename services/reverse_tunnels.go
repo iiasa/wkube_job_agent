@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -50,15 +51,27 @@ func startReverseTunnel(localSocket string) error {
 		return fmt.Errorf("failed to write SSH key to temp file: %v", err)
 	}
 
-	randomUUID := uuid.New()
+	tunnelPrefix := os.Getenv("TUNNEL_PREFIX")
+	if tunnelPrefix != "" {
+		projectSlug := os.Getenv("PROJECT_SLUG")
+		if projectSlug != "" {
+			tunnelPrefix = tunnelPrefix + "-" + projectSlug
+		}
+		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9\-]+$`, tunnelPrefix); !matched || len(tunnelPrefix) > 63 {
+			return fmt.Errorf("invalid TUNNEL_PREFIX: must contain only alphanumeric characters and dashes, and be at most 63 characters long")
+		}
+	} else {
+		tunnelPrefix = uuid.New().String()
+	}
 
-	remoteSocketPath := "/tmp/" + randomUUID.String() + ".sock"
+	remoteSocketPath := "/tmp/" + tunnelPrefix + ".sock"
 
 	var sshArgs []string
 	sshArgs = append(sshArgs,
 		"-i", tmpKeyFile.Name(),
 		"-o", "StrictHostKeyChecking=no", // ⚠️ Replace in production
 		"-o", "ExitOnForwardFailure=yes",
+		"-o", "StreamLocalBindUnlink=yes",
 		"-o", "ServerAliveInterval=10", // 🔸 detect dead tunnel fast
 		"-o", "ServerAliveCountMax=3", // 🔸 after 30s of no response, exit
 		"-N", // Don't run remote command
@@ -81,11 +94,11 @@ func startReverseTunnel(localSocket string) error {
 	cmd.Stderr = MultiLogWriter
 
 	// fmt.Fprintf(MultiLogWriter, "Starting reverse tunnel with command: ssh %s \n", strings.Join(sshArgs, " "))
-	fmt.Fprintf(MultiLogWriter, "Starting tunnel at 🔗  %s.%s%s \n", randomUUID.String(), tunnelGatewayDomain, tunnelGatewayPort)
+	fmt.Fprintf(MultiLogWriter, "Starting tunnel at 🔗  %s.%s%s \n", tunnelPrefix, tunnelGatewayDomain, tunnelGatewayPort)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start SSH reverse tunnel: %v", err)
 	} else {
-		fmt.Fprintf(MultiLogWriter, "Interactive socket tunneled at: %s.%s \n", randomUUID.String(), tunnelGatewayDomain)
+		fmt.Fprintf(MultiLogWriter, "Interactive socket tunneled at: %s.%s \n", tunnelPrefix, tunnelGatewayDomain)
 	}
 
 	return nil
