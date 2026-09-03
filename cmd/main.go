@@ -40,6 +40,11 @@ func isMountPoint(path string) bool {
 }
 
 func waitForMount(ctx context.Context) error {
+	// If the mountpoint directory doesn't exist, it wasn't configured for this pod.
+	if _, err := os.Stat("/mnt/wdrv"); os.IsNotExist(err) {
+		return nil
+	}
+
 	jobID := os.Getenv("JOB_ID")
 	probeFile := filepath.Join("/mnt/wdrv", fmt.Sprintf(".wagt_init_probe_%s", jobID))
 
@@ -180,12 +185,10 @@ func cmdRun(command string) {
 		return
 	}
 
-	if os.Getenv("WAIT_FOR_HF_MOUNT") == "true" {
-		if err := waitForMount(ctx); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
-			exitCode = 1
-			return
-		}
+	if err := waitForMount(ctx); err != nil {
+		fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
+		exitCode = 1
+		return
 	}
 
 	if err := services.PreProcessMappings(); err != nil {
@@ -292,12 +295,10 @@ func cmdFinalize() {
 		}
 	}
 
-	if os.Getenv("WAIT_FOR_HF_MOUNT") == "true" {
-		if err := waitForMount(ctx); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
-			services.RemoteLogSink.FinalFlush()
-			os.Exit(1)
-		}
+	if err := waitForMount(ctx); err != nil {
+		fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
+		services.RemoteLogSink.FinalFlush()
+		os.Exit(1)
 	}
 
 	defer func() {

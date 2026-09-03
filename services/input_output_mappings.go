@@ -656,9 +656,12 @@ func InvalidateFUSECacheForPath(path string) {
 	}
 
 	for {
-		oldPath := filepath.Join(dir, "__wagt_refresh_trigger__")
-		newPath := filepath.Join(dir, "__wagt_refresh_trigger_dest__")
-		_ = os.Rename(oldPath, newPath)
+		// Try to force a directory mtime update by creating and deleting a file.
+		// This reliably invalidates FUSE readdir/attr caches in the kernel.
+		triggerFile := filepath.Join(dir, fmt.Sprintf(".wagt_refresh_%d", time.Now().UnixNano()))
+		if err := os.WriteFile(triggerFile, []byte(""), 0644); err == nil {
+			_ = os.Remove(triggerFile)
+		}
 
 		if dir == "/mnt/wdrv" || dir == "/" || dir == "." {
 			break
