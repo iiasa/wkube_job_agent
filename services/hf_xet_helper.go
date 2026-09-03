@@ -253,11 +253,19 @@ func RunHelperCommand(ctx context.Context, args []string) error {
 	scriptPath := filepath.Join(destDir, "hf_xet_helper.py")
 	fullArgs := append([]string{scriptPath}, args...)
 
+	hfHome := "/mnt/tmp/hf_cache"
+	if destDir == "/agent" {
+		hfHome = "/agent/hf_cache"
+	}
+	if err := os.MkdirAll(hfHome, 0755); err != nil {
+		fmt.Fprintf(MultiLogWriter, "Warning: failed to create HF_HOME: %v\n", err)
+	}
+
 	cmd := exec.CommandContext(ctx, pythonBin, fullArgs...)
 	cmd.Stdout = MultiLogWriter
 	cmd.Stderr = MultiLogWriter
 	cmd.Env = append(os.Environ(),
-		"HF_HOME=/mnt/tmp/hf_cache",
+		"HF_HOME="+hfHome,
 		// "RUST_LOG=debug",
 		// "HF_XET_LOG_DEST=stderr",
 	)
