@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -23,6 +25,7 @@ var omittedMsgPrefix = "\n[Logs omitted: %d messages dropped due to full channel
 type RemoteLogger struct {
 	logChan     chan []byte
 	ctx         context.Context
+	cancel      context.CancelFunc
 	droppedLogs int
 	mu          sync.Mutex
 	wg          sync.WaitGroup
@@ -32,6 +35,7 @@ func NewRemoteLogger(ctx context.Context, cancel context.CancelFunc) *RemoteLogg
 	rl := &RemoteLogger{
 		logChan: make(chan []byte, logChannelSize),
 		ctx:     ctx,
+		cancel:  cancel,
 	}
 
 	rl.wg.Add(1)
@@ -102,7 +106,15 @@ DrainLoop:
 	counterMu.Lock()
 	logFilename := fmt.Sprintf("wkube%08d", logCounter)
 	logCounter++
+	counterStr := strconv.Itoa(logCounter) + "\n"
 	counterMu.Unlock()
+
+	// Write the counter to disk dynamically. If the job is abruptly terminated (SIGTERM), 
+	// the sidecar trap might start 'wagt finalize' while 'wagt run' is still shutting down.
+	// This ensures the sidecar reads the correct counter and doesn't overwrite wkube00000000.log!
+	if err := os.WriteFile(LogCounterPath, []byte(counterStr), 0644); err != nil {
+		fmt.Fprintf(MultiLogWriter, "error writing log counter: %v\n", err)
+	}
 
 	if err := SendBatch(buf.Bytes(), logFilename, cancel); err != nil {
 		fmt.Fprintf(MultiLogWriter, "Failed to send logs to remote sink: %v\n", err)
@@ -123,6 +135,12 @@ func (rl *RemoteLogger) Wait() {
 }
 
 func (rl *RemoteLogger) FinalFlush() {
+	if rl.cancel != nil {
+		rl.cancel()
+	}
+	rl.wg.Wait()
+	// Flush any logs that were added to the channel after the background worker exited
+	// (e.g. if the context was cancelled early, but the child process kept printing during shutdown)
 	rl.flushFromChannel(nil)
 }
 

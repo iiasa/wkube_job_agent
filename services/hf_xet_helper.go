@@ -13,7 +13,6 @@ const HfXetHelperScript = `import sys
 import json
 import urllib.request
 import urllib.error
-import hashlib
 import time
 import os
 
@@ -62,12 +61,8 @@ class TokenRefresher:
 
         return self.cas_token, self.expires_at
 
-def compute_sha256(filepath):
-    h = hashlib.sha256()
-    with open(filepath, 'rb') as f:
-        for chunk in iter(lambda: f.read(65536), b''):
-            h.update(chunk)
-    return h.hexdigest()
+def compute_size(filepath):
+    return os.path.getsize(filepath)
 
 def do_download(endpoint, cas_token, expires_at, files_json):
     import hf_xet
@@ -111,12 +106,11 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
     import hf_xet
     files_list = json.loads(files_json)
 
-    # Compute sha256 for every file BEFORE uploading so the hash is guaranteed
-    # to match the bytes that will be read by upload_files.  Computing it after
-    # upload creates a race: if the file is modified between the two reads the
-    # registered sha256 would describe a different version than the uploaded CAS
-    # content, producing a corrupted registration.
-    pre_upload_sha256 = {f["local_path"]: compute_sha256(f["local_path"]) for f in files_list}
+    # Compute size for every file BEFORE uploading so the size is guaranteed
+    # to match the bytes that will be read by upload_files. Computing it after
+    # upload (or relying on hf_xet's upload_info) can cause a race or FUSE stat
+    # caching bugs when the file is modified in hf-mount.
+    pre_upload_info = {f["local_path"]: compute_size(f["local_path"]) for f in files_list}
 
     refresher = TokenRefresher(cas_token, expires_at)
     current_token, current_expiry = refresher.refresh()
@@ -134,17 +128,17 @@ def do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files
     ) as commit:
         handles = []
         for f in files_list:
-            h = commit.start_upload_file(f["local_path"], sha256=pre_upload_sha256[f["local_path"]])
+            h = commit.start_upload_file(f["local_path"])
             handles.append((f, h))
         
     registration_items = []
     for f, h in handles:
         upload_info = h.result()
+        file_size_val = pre_upload_info[f["local_path"]]
         registration_items.append({
             "filename": f"{project_slug}/{f['remote_path']}",
             "merkle_hash": upload_info.xet_info.hash,
-            "sha256": pre_upload_sha256[f["local_path"]],
-            "file_size": upload_info.xet_info.file_size,
+            "file_size": file_size_val,
             "content_type": "application/octet-stream"
         })
     
