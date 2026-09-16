@@ -25,6 +25,7 @@ var omittedMsgPrefix = "\n[Logs omitted: %d messages dropped due to full channel
 type RemoteLogger struct {
 	logChan     chan []byte
 	ctx         context.Context
+	ctxCancel   context.CancelFunc
 	cancel      context.CancelFunc
 	droppedLogs int
 	mu          sync.Mutex
@@ -32,10 +33,12 @@ type RemoteLogger struct {
 }
 
 func NewRemoteLogger(ctx context.Context, cancel context.CancelFunc) *RemoteLogger {
+	logCtx, logCancel := context.WithCancel(ctx)
 	rl := &RemoteLogger{
-		logChan: make(chan []byte, logChannelSize),
-		ctx:     ctx,
-		cancel:  cancel,
+		logChan:   make(chan []byte, logChannelSize),
+		ctx:       logCtx,
+		ctxCancel: logCancel,
+		cancel:    cancel,
 	}
 
 	rl.wg.Add(1)
@@ -135,8 +138,8 @@ func (rl *RemoteLogger) Wait() {
 }
 
 func (rl *RemoteLogger) FinalFlush() {
-	if rl.cancel != nil {
-		rl.cancel()
+	if rl.ctxCancel != nil {
+		rl.ctxCancel()
 	}
 	rl.wg.Wait()
 	// Flush any logs that were added to the channel after the background worker exited
