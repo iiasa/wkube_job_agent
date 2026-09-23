@@ -157,7 +157,7 @@ func cmdRun(command string) {
 			fmt.Fprintf(services.MultiLogWriter, "error writing log counter: %v\n", err)
 		}
 
-		os.Exit(0)
+		cmdFinalize()
 	}()
 
 	if shellPath, err := exec.LookPath("sh"); err == nil {
