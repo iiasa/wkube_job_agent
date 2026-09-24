@@ -298,19 +298,29 @@ func inputMappingFromMountedStorage(source, destination string) error {
 	sourceIsDir := false
 
 	if err != nil {
-		if os.IsNotExist(err) {
-			if strings.HasSuffix(source, "/") {
-				if err := os.MkdirAll(source, 0775); err != nil {
-					return fmt.Errorf("error: creating directory for data mapping from mounted storage '%s': %w", source, err)
-				}
-				sourceIsDir = true
-			} else {
-				return fmt.Errorf("error: file for data mounting from mounted storage does not exists: %s", source)
-			}
-		} else {
-			return fmt.Errorf("error: checking source '%s': %w", source, err)
+		if os.IsNotExist(err) && strings.HasPrefix(source, "/mnt/wdrv") {
+			fmt.Fprintf(MultiLogWriter, "warning: source file '%s' not found, retrying once after 30 seconds...\n", source)
+			time.Sleep(30 * time.Second)
+			sourceInfo, err = os.Lstat(source)
 		}
-	} else {
+
+		if err != nil {
+			if os.IsNotExist(err) {
+				if strings.HasSuffix(source, "/") {
+					if err := os.MkdirAll(source, 0775); err != nil {
+						return fmt.Errorf("error: creating directory for data mapping from mounted storage '%s': %w", source, err)
+					}
+					sourceIsDir = true
+				} else {
+					return fmt.Errorf("error: file for data mounting from mounted storage does not exists: %s", source)
+				}
+			} else {
+				return fmt.Errorf("error: checking source '%s': %w", source, err)
+			}
+		}
+	}
+	
+	if err == nil {
 		if sourceInfo.Mode()&os.ModeSymlink != 0 {
 			statInfo, err := os.Stat(source)
 			if err != nil {
