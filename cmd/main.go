@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -160,24 +162,7 @@ func cmdRun(command string) {
 		cmdFinalize()
 	}()
 
-	if shellPath, err := exec.LookPath("sh"); err == nil {
-		cmd = exec.CommandContext(ctx, shellPath, "-c", command)
-	} else {
-		parts := strings.Fields(command)
-		if len(parts) > 0 {
-			cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
-		} else {
-			fmt.Fprintf(services.MultiLogWriter, "Error: empty command string\n")
-			exitCode = 1
-			return
-		}
-	}
-	
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
-	cmd.Stdout = services.MultiLogWriter
-	cmd.Stderr = services.MultiLogWriter
+	// We will create the cmd inside the retry loop below
 
 	if err := services.UpdateJobStatus("MAPPING_INPUTS"); err != nil {
 		fmt.Fprintf(services.MultiLogWriter, "error updating status to MAPPING_INPUTS: %v\n", err)
@@ -233,13 +218,57 @@ func cmdRun(command string) {
 		return
 	}
 
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(services.MultiLogWriter, "error starting command: %v\n", err)
-		exitCode = 1
-		return
-	}
+	globalStartTime := time.Now()
+	for attempt := 1; attempt <= 12; attempt++ {
+		if shellPath, err := exec.LookPath("sh"); err == nil {
+			cmd = exec.CommandContext(ctx, shellPath, "-c", command)
+		} else {
+			parts := strings.Fields(command)
+			if len(parts) > 0 {
+				cmd = exec.CommandContext(ctx, parts[0], parts[1:]...)
+			} else {
+				fmt.Fprintf(services.MultiLogWriter, "Error: empty command string\n")
+				exitCode = 1
+				return
+			}
+		}
+		
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+		
+		var stderrBuf ringBuffer
+		stderrBuf.max = 64 * 1024 // 64KB limit
+		cmd.Stdout = services.MultiLogWriter
+		// Write to both the log and our bounded buffer to inspect for errors
+		cmd.Stderr = io.MultiWriter(services.MultiLogWriter, &stderrBuf)
 
-	if err := cmd.Wait(); err != nil {
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error starting command: %v\n", err)
+			exitCode = 1
+			return
+		}
+
+		err := cmd.Wait()
+		if err == nil {
+			exitCode = 0
+			if reportErr := services.VerboseResourceReport(); reportErr != nil {
+				fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", reportErr)
+			}
+			break
+		}
+
+		// If the command failed and stderr mentions missing files in /mnt/wdrv,
+		// we retry if we are still within the first 2 minutes of the total execution time.
+		if time.Since(globalStartTime) < 2*time.Minute && ctx.Err() == nil {
+			stderrStr := stderrBuf.String()
+			if strings.Contains(stderrStr, "No such file or directory") && strings.Contains(stderrStr, "/mnt/wdrv") {
+				fmt.Fprintf(services.MultiLogWriter, "\n[Agent] Detected missing /mnt/wdrv file. Forcing cache invalidate and retrying script in 10s (attempt %d/12)...\n\n", attempt)
+				services.InvalidateFUSECacheForPath("/mnt/wdrv")
+				time.Sleep(10 * time.Second)
+				continue
+			}
+		}
+
 		if ctx.Err() != nil {
 			fmt.Fprintf(services.MultiLogWriter, "Command interrupted due to context cancellation: %v\n", ctx.Err())
 		} else {
@@ -253,12 +282,7 @@ func cmdRun(command string) {
 		if reportErr := services.VerboseResourceReport(); reportErr != nil {
 			fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", reportErr)
 		}
-		return
-	}
-
-	exitCode = 0
-	if reportErr := services.VerboseResourceReport(); reportErr != nil {
-		fmt.Fprintf(services.MultiLogWriter, "Error generating resource report: %v\n", reportErr)
+		break
 	}
 }
 
@@ -382,4 +406,32 @@ func main() {
 	default:
 		usage()
 	}
+}
+
+type ringBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+	max int
+}
+
+func (r *ringBuffer) Write(p []byte) (n int, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	
+	if len(p) >= r.max {
+		r.buf = append([]byte{}, p[len(p)-r.max:]...)
+		return len(p), nil
+	}
+	
+	r.buf = append(r.buf, p...)
+	if len(r.buf) > r.max {
+		r.buf = r.buf[len(r.buf)-r.max:]
+	}
+	return len(p), nil
+}
+
+func (r *ringBuffer) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return string(r.buf)
 }

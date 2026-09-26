@@ -299,9 +299,20 @@ func inputMappingFromMountedStorage(source, destination string) error {
 
 	if err != nil {
 		if os.IsNotExist(err) && strings.HasPrefix(source, "/mnt/wdrv") {
-			fmt.Fprintf(MultiLogWriter, "warning: source file '%s' not found, retrying once after 30 seconds...\n", source)
-			time.Sleep(30 * time.Second)
-			sourceInfo, err = os.Lstat(source)
+			fmt.Fprintf(MultiLogWriter, "warning: source file '%s' not found, entering FUSE cache wait loop (up to 120s)...\n", source)
+			
+			// Loop up to 120 seconds in 10s intervals
+			for i := 0; i < 12; i++ {
+				InvalidateFUSECacheForPath(source)
+				time.Sleep(10 * time.Second)
+				InvalidateFUSECacheForPath(source)
+				
+				sourceInfo, err = os.Lstat(source)
+				if err == nil {
+					fmt.Fprintf(MultiLogWriter, "success: source file '%s' found after %d seconds\n", source, (i+1)*10)
+					break
+				}
+			}
 		}
 
 		if err != nil {
@@ -668,7 +679,8 @@ func InvalidateFUSECacheForPath(path string) {
 	for {
 		// Try to force a directory mtime update by creating and deleting a file.
 		// This reliably invalidates FUSE readdir/attr caches in the kernel.
-		triggerFile := filepath.Join(dir, fmt.Sprintf(".wagt_refresh_%d", time.Now().UnixNano()))
+		// Adding the OS PID prevents cross-pod / cross-process collisions
+		triggerFile := filepath.Join(dir, fmt.Sprintf(".wagt_refresh_%d_%d", os.Getpid(), time.Now().UnixNano()))
 		if err := os.WriteFile(triggerFile, []byte(""), 0644); err == nil {
 			_ = os.Remove(triggerFile)
 		}
