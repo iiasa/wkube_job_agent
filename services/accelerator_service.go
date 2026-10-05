@@ -118,7 +118,7 @@ func CreateRequest(method, endpoint string, body []byte) (*http.Request, error) 
 		return nil, fmt.Errorf("failed to retrieve access token: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1/ajob-cli%s", gatewayServer, endpoint)
+	url := fmt.Sprintf("%s/api/v1/ajob-cli%s", gatewayServer, endpoint)
 	var req *http.Request
 
 	if body != nil {
