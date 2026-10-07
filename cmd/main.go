@@ -355,16 +355,6 @@ func cmdFinalize() {
 		fmt.Fprintf(services.MultiLogWriter, "error executing post task registry: %v\n", err)
 	}
 
-	if exitCode == 0 && postProcessErr == nil && wdrvUploadErr == nil {
-		if err := services.UpdateJobStatus("DONE"); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v\n", err)
-		}
-	} else {
-		if err := services.UpdateJobStatus("ERROR"); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "error updating status to ERROR: %v\n", err)
-		}
-	}
-
 	projectSlug := services.GetProjectSlug()
 	if projectSlug != "" {
 		if err := services.RemotePushLog(services.JobLogPath, services.LogFileName, projectSlug); err != nil {
@@ -378,6 +368,16 @@ func cmdFinalize() {
 	}
 
 	services.RemoteLogSink.FinalFlush()
+
+	if exitCode == 0 && postProcessErr == nil && wdrvUploadErr == nil {
+		if err := services.UpdateJobStatus("DONE"); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error updating status to DONE: %v\n", err)
+		}
+	} else {
+		if err := services.UpdateJobStatus("ERROR"); err != nil {
+			fmt.Fprintf(services.MultiLogWriter, "error updating status to ERROR: %v\n", err)
+		}
+	}
 
 	os.Exit(exitCode)
 }
