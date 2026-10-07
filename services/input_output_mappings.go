@@ -139,13 +139,13 @@ func remoteCopy(source, destination string) error {
 		casEndpoint,
 		casToken,
 		fmt.Sprintf("%d", expiresAt),
-		string(filesJSON),
+		"-",
 	}
 
 	fmt.Fprintf(MultiLogWriter, "Downloading %d files via hf_xet...\n", len(downloadList))
 	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
 	defer cancel()
-	if err := RunHelperCommand(ctx, args); err != nil {
+	if err := RunHelperCommandWithStdin(ctx, args, string(filesJSON)); err != nil {
 		return fmt.Errorf("hf_xet download failed: %w", err)
 	}
 
@@ -234,13 +234,13 @@ func remotePush(source, destination string) error {
 		casToken,
 		fmt.Sprintf("%d", expiresAt),
 		registerUrl,
-		string(filesJSON),
+		"-",
 	}
 
 	fmt.Fprintf(MultiLogWriter, "Uploading %d files via hf_xet...\n", len(uploadList))
 	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
 	defer cancel()
-	if err := RunHelperCommand(ctx, args); err != nil {
+	if err := RunHelperCommandWithStdin(ctx, args, string(filesJSON)); err != nil {
 		return fmt.Errorf("hf_xet upload failed: %w", err)
 	}
 
@@ -921,7 +921,7 @@ func RemotePushLog(source, destination, projectSlug string) error {
 		casToken,
 		fmt.Sprintf("%d", expiresAt),
 		registerUrl,
-		string(filesJSON),
+		"-",
 	}
 
 
@@ -929,7 +929,7 @@ func RemotePushLog(source, destination, projectSlug string) error {
 	fmt.Fprintf(MultiLogWriter, "Uploading %d log files via hf_xet...\n", len(uploadList))
 	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
 	defer cancel()
-	if err := RunHelperCommand(ctx, args); err != nil {
+	if err := RunHelperCommandWithStdin(ctx, args, string(filesJSON)); err != nil {
 		return fmt.Errorf("hf_xet log upload failed: %w", err)
 	}
 
@@ -1029,13 +1029,13 @@ func UploadWdrvFilesCreatedByJobGid() error {
 		casToken,
 		fmt.Sprintf("%d", expiresAt),
 		registerUrl,
-		string(filesJSON),
+		"-",
 	}
 
 	fmt.Fprintf(MultiLogWriter, "Uploading %d files created by JOB_GID from /mnt/wdrv via hf_xet...\n", len(uploadList))
 	ctx, cancel := context.WithTimeout(RootCtx, 30*time.Minute)
 	defer cancel()
-	if err := RunHelperCommand(ctx, args); err != nil {
+	if err := RunHelperCommandWithStdin(ctx, args, string(filesJSON)); err != nil {
 		return fmt.Errorf("hf_xet upload failed: %w", err)
 	}
 

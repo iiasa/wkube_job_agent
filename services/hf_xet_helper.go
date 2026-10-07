@@ -177,6 +177,8 @@ def main():
         cas_token = sys.argv[3]
         expires_at = int(sys.argv[4])
         files_json = sys.argv[5]
+        if files_json == "-":
+            files_json = sys.stdin.read()
         do_download(endpoint, cas_token, expires_at, files_json)
     elif cmd == "upload":
         project_slug = sys.argv[2]
@@ -185,6 +187,8 @@ def main():
         expires_at = int(sys.argv[5])
         register_url = sys.argv[6]
         files_json = sys.argv[7]
+        if files_json == "-":
+            files_json = sys.stdin.read()
         do_upload(project_slug, endpoint, cas_token, expires_at, register_url, files_json)
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)
@@ -258,6 +262,45 @@ func RunHelperCommand(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, pythonBin, fullArgs...)
 	cmd.Stdout = MultiLogWriter
 	cmd.Stderr = MultiLogWriter
+	cmd.Env = append(os.Environ(),
+		"HF_HOME="+hfHome,
+		// "RUST_LOG=debug",
+		// "HF_XET_LOG_DEST=stderr",
+	)
+
+	return cmd.Run()
+}
+
+// RunHelperCommandWithStdin executes the hf_xet helper python subcommand, passing stdinData to its stdin.
+func RunHelperCommandWithStdin(ctx context.Context, args []string, stdinData string) error {
+	if err := WriteHelperScript(); err != nil {
+		return err
+	}
+
+	pythonBin, err := GetPythonInterpreter()
+	if err != nil {
+		return err
+	}
+
+	destDir := "/mnt/tmp/.wkube_agent"
+	if _, err := os.Stat(destDir); os.IsNotExist(err) {
+		destDir = "/agent" // Local dev fallback
+	}
+	scriptPath := filepath.Join(destDir, "hf_xet_helper.py")
+	fullArgs := append([]string{scriptPath}, args...)
+
+	hfHome := "/mnt/tmp/hf_cache"
+	if destDir == "/agent" {
+		hfHome = "/agent/hf_cache"
+	}
+	if err := os.MkdirAll(hfHome, 0755); err != nil {
+		fmt.Fprintf(MultiLogWriter, "Warning: failed to create HF_HOME: %v\n", err)
+	}
+
+	cmd := exec.CommandContext(ctx, pythonBin, fullArgs...)
+	cmd.Stdout = MultiLogWriter
+	cmd.Stderr = MultiLogWriter
+	cmd.Stdin = strings.NewReader(stdinData)
 	cmd.Env = append(os.Environ(),
 		"HF_HOME="+hfHome,
 		// "RUST_LOG=debug",
