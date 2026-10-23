@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -11,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -936,6 +936,49 @@ func RemotePushLog(source, destination, projectSlug string) error {
 	return nil
 }
 
+// overlayWritesIndex is a virtual file exposed by hf-mount at the mount root.
+// Each line is "<relative path>:<gid>" for every file in the overlay backing dir.
+const overlayWritesIndex = "/mnt/wdrv/.hf_overlay_writes"
+
+// readOverlayWritesByGid returns the relative paths of overlay files owned by gid.
+func readOverlayWritesByGid(gid uint32) ([]string, error) {
+	f, err := os.Open(overlayWritesIndex)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	// The virtual file reports a fake size (1 GiB), so avoid os.ReadFile which preallocates by size.
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Paths may contain ':', so split on the last one.
+		idx := strings.LastIndex(line, ":")
+		if idx <= 0 {
+			continue
+		}
+		relPath := strings.TrimPrefix(line[:idx], "/")
+		lineGid, err := strconv.ParseUint(line[idx+1:], 10, 32)
+		if err != nil || uint32(lineGid) != gid {
+			continue
+		}
+		// Skip transient files created by InvalidateFUSECacheForPath.
+		if strings.HasPrefix(filepath.Base(relPath), ".wagt_refresh_") {
+			continue
+		}
+		paths = append(paths, relPath)
+	}
+	return paths, nil
+}
+
 func UploadWdrvFilesCreatedByJobGid() error {
 	jobGidStr := os.Getenv("JOB_GID")
 	if jobGidStr == "" {
@@ -953,54 +996,29 @@ func UploadWdrvFilesCreatedByJobGid() error {
 
 	// Check if the job itself is healthy first.
 	// If it is unhealthy, the FUSE mount (/mnt/wdrv) might be hung/broken.
-	// In that case, check if the mount is responsive, and skip walk if not.
+	// In that case, check if the mount is responsive, and skip reading if not.
 	if healthy, err := CheckHealth(nil); err == nil && !healthy {
 		if !isWdrvResponsive() {
-			fmt.Fprintln(MultiLogWriter, "warning: job is unhealthy and /mnt/wdrv is not responsive, skipping walk to avoid hang")
+			fmt.Fprintln(MultiLogWriter, "warning: job is unhealthy and /mnt/wdrv is not responsive, skipping upload to avoid hang")
 			return nil
 		}
 	}
 
-	var uploadList []uploadFileInfo
-
-	err = filepath.WalkDir("/mnt/wdrv", func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-
-		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !ok {
-			return nil
-		}
-
-		if stat.Gid == uint32(jobGid) {
-			relPath, err := filepath.Rel("/mnt/wdrv", path)
-			if err != nil {
-				return err
-			}
-			destPath := relPath
-			destPath = strings.TrimRight(destPath, string(os.PathSeparator))
-
-			uploadList = append(uploadList, uploadFileInfo{
-				LocalPath:  path,
-				RemotePath: destPath,
-			})
-		}
-		return nil
-	})
+	relPaths, err := readOverlayWritesByGid(uint32(jobGid))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // /mnt/wdrv doesn't exist or is not mounted, skip
+		return fmt.Errorf("error reading %s: %v", overlayWritesIndex, err)
+	}
+
+	var uploadList []uploadFileInfo
+	for _, relPath := range relPaths {
+		localPath := filepath.Join("/mnt/wdrv", relPath)
+		if info, err := os.Stat(localPath); err != nil || !info.Mode().IsRegular() {
+			continue
 		}
-		return fmt.Errorf("error walking /mnt/wdrv: %v", err)
+		uploadList = append(uploadList, uploadFileInfo{
+			LocalPath:  localPath,
+			RemotePath: strings.TrimRight(relPath, string(os.PathSeparator)),
+		})
 	}
 
 	if len(uploadList) == 0 {
