@@ -940,8 +940,13 @@ func RemotePushLog(source, destination, projectSlug string) error {
 // Each line is "<relative path>:<gid>" for every file in the overlay backing dir.
 const overlayWritesIndex = "/mnt/wdrv/.hf_overlay_writes"
 
-// readOverlayWritesByGid returns the relative paths of overlay files owned by gid.
-func readOverlayWritesByGid(gid uint32) ([]string, error) {
+type overlayEntry struct {
+	RelPath string
+	Gid     uint32
+}
+
+// readOverlayWrites parses the overlay writes index into (relative path, gid) entries.
+func readOverlayWrites() ([]overlayEntry, error) {
 	f, err := os.Open(overlayWritesIndex)
 	if err != nil {
 		return nil, err
@@ -954,8 +959,14 @@ func readOverlayWritesByGid(gid uint32) ([]string, error) {
 		return nil, err
 	}
 
-	var paths []string
-	for _, line := range strings.Split(string(data), "\n") {
+	fmt.Fprintf(MultiLogWriter, "[DEBUG] %s (%d bytes) content:\n%s\n[DEBUG] end of %s\n", overlayWritesIndex, len(data), string(data), overlayWritesIndex)
+
+	return parseOverlayWrites(string(data)), nil
+}
+
+func parseOverlayWrites(data string) []overlayEntry {
+	var entries []overlayEntry
+	for _, line := range strings.Split(data, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -963,25 +974,56 @@ func readOverlayWritesByGid(gid uint32) ([]string, error) {
 		// Paths may contain ':', so split on the last one.
 		idx := strings.LastIndex(line, ":")
 		if idx <= 0 {
+			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (no gid separator): %q\n", line)
 			continue
 		}
-		relPath := strings.TrimPrefix(line[:idx], "/")
 		lineGid, err := strconv.ParseUint(line[idx+1:], 10, 32)
-		if err != nil || uint32(lineGid) != gid {
+		if err != nil {
+			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (bad gid %q): %q\n", line[idx+1:], line)
 			continue
 		}
-		// Skip transient files created by InvalidateFUSECacheForPath.
-		if strings.HasPrefix(filepath.Base(relPath), ".wagt_refresh_") {
+		entries = append(entries, overlayEntry{
+			RelPath: strings.TrimPrefix(line[:idx], "/"),
+			Gid:     uint32(lineGid),
+		})
+	}
+	return entries
+}
+
+// isAgentOverlayFile reports files the agent itself keeps in the overlay
+// (cache-invalidation triggers and heartbeat markers); never upload or sweep them.
+func isAgentOverlayFile(relPath string) bool {
+	return strings.HasPrefix(filepath.Base(relPath), ".wagt_refresh_") ||
+		strings.HasPrefix(relPath, overlayHeartbeatDirName+"/")
+}
+
+// readOverlayWritesByGid returns the relative paths of overlay files owned by gid.
+func readOverlayWritesByGid(gid uint32) ([]string, error) {
+	entries, err := readOverlayWrites()
+	if err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	for _, entry := range entries {
+		if entry.Gid != gid {
+			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (gid %d != job gid %d): %q\n", entry.Gid, gid, entry.RelPath)
 			continue
 		}
-		paths = append(paths, relPath)
+		if isAgentOverlayFile(entry.RelPath) {
+			continue
+		}
+		fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line matched job gid %d: %q\n", gid, entry.RelPath)
+		paths = append(paths, entry.RelPath)
 	}
 	return paths, nil
 }
 
 func UploadWdrvFilesCreatedByJobGid() error {
 	jobGidStr := os.Getenv("JOB_GID")
+	fmt.Fprintf(MultiLogWriter, "[DEBUG] UploadWdrvFilesCreatedByJobGid: JOB_GID=%q process uid=%d gid=%d egid=%d\n", jobGidStr, os.Getuid(), os.Getgid(), os.Getegid())
 	if jobGidStr == "" {
+		fmt.Fprintln(MultiLogWriter, "[DEBUG] JOB_GID not set, skipping wdrv upload")
 		return nil // No JOB_GID set, skip
 	}
 	jobGid, err := strconv.ParseUint(jobGidStr, 10, 32)
@@ -990,6 +1032,7 @@ func UploadWdrvFilesCreatedByJobGid() error {
 	}
 
 	projectSlug := GetProjectSlug()
+	fmt.Fprintf(MultiLogWriter, "[DEBUG] project slug=%q\n", projectSlug)
 	if projectSlug == "" {
 		return fmt.Errorf("project_slug is empty")
 	}
@@ -1012,9 +1055,16 @@ func UploadWdrvFilesCreatedByJobGid() error {
 	var uploadList []uploadFileInfo
 	for _, relPath := range relPaths {
 		localPath := filepath.Join("/mnt/wdrv", relPath)
-		if info, err := os.Stat(localPath); err != nil || !info.Mode().IsRegular() {
+		info, err := os.Stat(localPath)
+		if err != nil {
+			fmt.Fprintf(MultiLogWriter, "[DEBUG] skipping %s: stat error: %v\n", localPath, err)
 			continue
 		}
+		if !info.Mode().IsRegular() {
+			fmt.Fprintf(MultiLogWriter, "[DEBUG] skipping %s: not a regular file (mode %v)\n", localPath, info.Mode())
+			continue
+		}
+		fmt.Fprintf(MultiLogWriter, "[DEBUG] queueing %s -> %s (%d bytes)\n", localPath, relPath, info.Size())
 		uploadList = append(uploadList, uploadFileInfo{
 			LocalPath:  localPath,
 			RemotePath: strings.TrimRight(relPath, string(os.PathSeparator)),

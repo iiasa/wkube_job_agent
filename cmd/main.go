@@ -176,6 +176,15 @@ func cmdRun(command string) {
 		return
 	}
 
+	// Mark this job alive in the shared overlay before sweeping, so concurrent
+	// sweeps on the same node never treat its files as abandoned.
+	if err := services.StartOverlayHeartbeat(); err != nil {
+		fmt.Fprintf(services.MultiLogWriter, "error: %v\n", err)
+		exitCode = 1
+		return
+	}
+	services.SweepStaleOverlayFiles()
+
 	if err := services.PreProcessMappings(); err != nil {
 		fmt.Fprintf(services.MultiLogWriter, "error in pre-process-mappings: %v\n", err)
 		exitCode = 1
@@ -345,6 +354,7 @@ func cmdFinalize() {
 	if wdrvUploadErr != nil {
 		fmt.Fprintf(services.MultiLogWriter, "error in wdrv-gid-upload: %v\n", wdrvUploadErr)
 	}
+	services.StopOverlayHeartbeat()
 
 
 	if err := services.UpdateJobStatus("MAPPING_OUTPUTS"); err != nil {
