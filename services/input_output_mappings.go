@@ -937,12 +937,14 @@ func RemotePushLog(source, destination, projectSlug string) error {
 }
 
 // overlayWritesIndex is a virtual file exposed by hf-mount at the mount root.
-// Each line is "<relative path>:<gid>" for every file in the overlay backing dir.
+// Each line is "<relative path>:<gid>:<mtime>" (mtime in Unix seconds) for every file in
+// the overlay backing dir.
 const overlayWritesIndex = "/mnt/wdrv/.hf_overlay_writes"
 
 type overlayEntry struct {
 	RelPath string
 	Gid     uint32
+	Mtime   int64 // Unix seconds
 }
 
 // readOverlayWrites parses the overlay writes index into (relative path, gid) entries.
@@ -971,23 +973,36 @@ func parseOverlayWrites(data string) []overlayEntry {
 		if line == "" {
 			continue
 		}
-		// Paths may contain ':', so split on the last one.
-		idx := strings.LastIndex(line, ":")
-		if idx <= 0 {
-			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (no gid separator): %q\n", line)
+		entry, ok := parseOverlayLine(line)
+		if !ok {
+			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (unparsable): %q\n", line)
 			continue
 		}
-		lineGid, err := strconv.ParseUint(line[idx+1:], 10, 32)
-		if err != nil {
-			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (bad gid %q): %q\n", line[idx+1:], line)
-			continue
-		}
-		entries = append(entries, overlayEntry{
-			RelPath: strings.TrimPrefix(line[:idx], "/"),
-			Gid:     uint32(lineGid),
-		})
+		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// parseOverlayLine parses "<path>:<gid>:<mtime>". Paths may contain ':', so the
+// fields are taken from the right.
+func parseOverlayLine(line string) (overlayEntry, bool) {
+	last := strings.LastIndex(line, ":")
+	if last <= 0 {
+		return overlayEntry{}, false
+	}
+	prev := strings.LastIndex(line[:last], ":")
+	if prev <= 0 {
+		return overlayEntry{}, false
+	}
+	gid, err := strconv.ParseUint(line[prev+1:last], 10, 32)
+	if err != nil {
+		return overlayEntry{}, false
+	}
+	mtime, err := strconv.ParseInt(line[last+1:], 10, 64)
+	if err != nil {
+		return overlayEntry{}, false
+	}
+	return overlayEntry{RelPath: strings.TrimPrefix(line[:prev], "/"), Gid: uint32(gid), Mtime: mtime}, true
 }
 
 // isAgentOverlayFile reports files the agent itself keeps in the overlay
@@ -1076,6 +1091,10 @@ func UploadWdrvFilesCreatedByJobGid() error {
 		return nil
 	}
 
+	// The job's overlay files have no value once the job is done, so remove them
+	// whether or not the upload below succeeds.
+	defer deleteWdrvFiles(uploadList)
+
 	filesJSON, err := json.Marshal(uploadList)
 	if err != nil {
 		return err
@@ -1107,16 +1126,18 @@ func UploadWdrvFilesCreatedByJobGid() error {
 		return fmt.Errorf("hf_xet upload failed: %w", err)
 	}
 
-	fmt.Fprintf(MultiLogWriter, "Deleting uploaded files from /mnt/wdrv...\n")
-	for _, fileInfo := range uploadList {
+	return nil
+}
+
+func deleteWdrvFiles(files []uploadFileInfo) {
+	fmt.Fprintf(MultiLogWriter, "Deleting %d files created by JOB_GID from /mnt/wdrv...\n", len(files))
+	for _, fileInfo := range files {
 		if err := os.Remove(fileInfo.LocalPath); err != nil {
 			fmt.Fprintf(MultiLogWriter, "Failed to delete %s: %v\n", fileInfo.LocalPath, err)
 		} else {
 			fmt.Fprintf(MultiLogWriter, "Deleted %s\n", fileInfo.LocalPath)
 		}
 	}
-
-	return nil
 }
 
 

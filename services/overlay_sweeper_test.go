@@ -58,17 +58,17 @@ func TestSweepOverlay(t *testing.T) {
 			"deadMarker":    writeAgedFile(t, root, ".wagt_alive/512345", 20*time.Minute, now),
 		}
 		entries := []overlayEntry{
-			{"globiom-results/13009/a.rds", 0},
-			{"globiom-results/15228/b.rds", 0},
-			{"globiom-results/12726/c.rds", 65534},
-			{"globiom-results/long-job/d.rds", liveGid},
-			{"globiom-results/crashed/e.rds", deadGid},
-			{"globiom-results/failed-upload/g.rds", finishedGid},
-			{"globiom-results/mine/f.rds", ownGid},
-			{"globiom-results/.wagt_refresh_1_2", 0},
-			{".wagt_alive/731691", liveGid},
-			{".wagt_alive/512345", deadGid},
-			{"globiom-results/gone/x.rds", 0}, // listed but already removed
+			{"globiom-results/13009/a.rds", 0, 0},
+			{"globiom-results/15228/b.rds", 0, 0},
+			{"globiom-results/12726/c.rds", 65534, 0},
+			{"globiom-results/long-job/d.rds", liveGid, 0},
+			{"globiom-results/crashed/e.rds", deadGid, 0},
+			{"globiom-results/failed-upload/g.rds", finishedGid, 0},
+			{"globiom-results/mine/f.rds", ownGid, 0},
+			{"globiom-results/.wagt_refresh_1_2", 0, 0},
+			{".wagt_alive/731691", liveGid, 0},
+			{".wagt_alive/512345", deadGid, 0},
+			{"globiom-results/gone/x.rds", 0, 0}, // listed but already removed
 		}
 		return root, now, files, entries
 	}
@@ -135,17 +135,33 @@ func TestParseOverlayWritesAndAgentFiles(t *testing.T) {
 	MultiLogWriter = io.Discard
 	defer func() { MultiLogWriter = oldWriter }()
 
-	entries := parseOverlayWrites("a/b:c.rds:400524\n\nbad-line\nx/y:notanumber\n.wagt_alive/400524:400524\n")
-	if len(entries) != 2 {
-		t.Fatalf("got %d entries, want 2: %+v", len(entries), entries)
+	entries := parseOverlayWrites(
+		"out/x.rds:731691:1761000000\n" +
+			"\n" +
+			"log:2026:run.lst:400524:1761000123\n" + // paths may contain ':'
+			"no-fields\n" +
+			"a/b.rds:400524\n" + // missing mtime
+			"x/y:notanumber:1761000000\n" +
+			"x/z:400524:notanumber\n" +
+			".wagt_alive/400524:400524:1761000200\n")
+	want := []overlayEntry{
+		{RelPath: "out/x.rds", Gid: 731691, Mtime: 1761000000},
+		{RelPath: "log:2026:run.lst", Gid: 400524, Mtime: 1761000123},
+		{RelPath: ".wagt_alive/400524", Gid: 400524, Mtime: 1761000200},
 	}
-	if entries[0].RelPath != "a/b:c.rds" || entries[0].Gid != 400524 {
-		t.Errorf("unexpected first entry %+v", entries[0])
+	if len(entries) != len(want) {
+		t.Fatalf("got %+v, want %+v", entries, want)
 	}
-	if !isAgentOverlayFile(entries[1].RelPath) {
+	for i := range want {
+		if entries[i] != want[i] {
+			t.Errorf("entry %d: got %+v, want %+v", i, entries[i], want[i])
+		}
+	}
+
+	if !isAgentOverlayFile(entries[2].RelPath) {
 		t.Errorf("heartbeat marker should be treated as an agent file")
 	}
-	if isAgentOverlayFile("a/b:c.rds") {
+	if isAgentOverlayFile(entries[1].RelPath) {
 		t.Errorf("job output should not be treated as an agent file")
 	}
 }
