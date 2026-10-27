@@ -54,6 +54,7 @@ func TestSweepOverlay(t *testing.T) {
 			"finishedFresh": writeAgedFile(t, root, "globiom-results/failed-upload/g.rds", time.Minute, now),
 			"ownFresh":      writeAgedFile(t, root, "globiom-results/mine/f.rds", time.Minute, now),
 			"refresh":       writeAgedFile(t, root, "globiom-results/.wagt_refresh_1_2", 30*24*time.Hour, now),
+			"ownMarker":     writeAgedFile(t, root, ".wagt_alive/400524", time.Second, now),
 			"liveMarker":    writeAgedFile(t, root, ".wagt_alive/731691", time.Minute, now),
 			"deadMarker":    writeAgedFile(t, root, ".wagt_alive/512345", 20*time.Minute, now),
 		}
@@ -66,6 +67,7 @@ func TestSweepOverlay(t *testing.T) {
 			{"globiom-results/failed-upload/g.rds", finishedGid, 0},
 			{"globiom-results/mine/f.rds", ownGid, 0},
 			{"globiom-results/.wagt_refresh_1_2", 0, 0},
+			{".wagt_alive/400524", ownGid, 0},
 			{".wagt_alive/731691", liveGid, 0},
 			{".wagt_alive/512345", deadGid, 0},
 			{"globiom-results/gone/x.rds", 0, 0}, // listed but already removed
@@ -93,6 +95,37 @@ func TestSweepOverlay(t *testing.T) {
 		}
 		if !exists(filepath.Join(root, "globiom-results", "13009")) {
 			t.Errorf("emptied directory should be kept while another job is running")
+		}
+	})
+
+	t.Run("unreadable markers delete nothing", func(t *testing.T) {
+		for name, breakMarkers := range map[string]func(root string, files map[string]string){
+			"marker dir missing": func(root string, _ map[string]string) {
+				if err := os.RemoveAll(filepath.Join(root, ".wagt_alive")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"own marker not visible": func(_ string, files map[string]string) {
+				if err := os.Remove(files["ownMarker"]); err != nil {
+					t.Fatal(err)
+				}
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				root, now, files, entries := setup(t)
+				breakMarkers(root, files)
+
+				res := sweepOverlay(root, entries, ownGid, cfg, now)
+
+				if !res.Skipped || res.Deleted != 0 {
+					t.Errorf("got skipped=%v deleted=%d, want skipped and nothing deleted", res.Skipped, res.Deleted)
+				}
+				for _, k := range []string{"unownedOld", "deadFresh", "finishedFresh", "liveOld"} {
+					if !exists(files[k]) {
+						t.Errorf("%s was deleted although running jobs could not be determined", k)
+					}
+				}
+			})
 		}
 	})
 

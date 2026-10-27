@@ -961,7 +961,7 @@ func readOverlayWrites() ([]overlayEntry, error) {
 		return nil, err
 	}
 
-	fmt.Fprintf(MultiLogWriter, "[DEBUG] %s (%d bytes) content:\n%s\n[DEBUG] end of %s\n", overlayWritesIndex, len(data), string(data), overlayWritesIndex)
+	debugf("%s (%d bytes) content:\n%s\n[DEBUG] end of %s", overlayWritesIndex, len(data), string(data), overlayWritesIndex)
 
 	return parseOverlayWrites(string(data)), nil
 }
@@ -975,7 +975,7 @@ func parseOverlayWrites(data string) []overlayEntry {
 		}
 		entry, ok := parseOverlayLine(line)
 		if !ok {
-			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (unparsable): %q\n", line)
+			debugf("overlay line skipped (unparsable): %q", line)
 			continue
 		}
 		entries = append(entries, entry)
@@ -1022,13 +1022,13 @@ func readOverlayWritesByGid(gid uint32) ([]string, error) {
 	var paths []string
 	for _, entry := range entries {
 		if entry.Gid != gid {
-			fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line skipped (gid %d != job gid %d): %q\n", entry.Gid, gid, entry.RelPath)
+			debugf("overlay line skipped (gid %d != job gid %d): %q", entry.Gid, gid, entry.RelPath)
 			continue
 		}
 		if isAgentOverlayFile(entry.RelPath) {
 			continue
 		}
-		fmt.Fprintf(MultiLogWriter, "[DEBUG] overlay line matched job gid %d: %q\n", gid, entry.RelPath)
+		debugf("overlay line matched job gid %d: %q", gid, entry.RelPath)
 		paths = append(paths, entry.RelPath)
 	}
 	return paths, nil
@@ -1036,9 +1036,9 @@ func readOverlayWritesByGid(gid uint32) ([]string, error) {
 
 func UploadWdrvFilesCreatedByJobGid() error {
 	jobGidStr := os.Getenv("JOB_GID")
-	fmt.Fprintf(MultiLogWriter, "[DEBUG] UploadWdrvFilesCreatedByJobGid: JOB_GID=%q process uid=%d gid=%d egid=%d\n", jobGidStr, os.Getuid(), os.Getgid(), os.Getegid())
+	debugf("UploadWdrvFilesCreatedByJobGid: JOB_GID=%q process uid=%d gid=%d egid=%d", jobGidStr, os.Getuid(), os.Getgid(), os.Getegid())
 	if jobGidStr == "" {
-		fmt.Fprintln(MultiLogWriter, "[DEBUG] JOB_GID not set, skipping wdrv upload")
+		debugf("JOB_GID not set, skipping wdrv upload")
 		return nil // No JOB_GID set, skip
 	}
 	jobGid, err := strconv.ParseUint(jobGidStr, 10, 32)
@@ -1047,7 +1047,7 @@ func UploadWdrvFilesCreatedByJobGid() error {
 	}
 
 	projectSlug := GetProjectSlug()
-	fmt.Fprintf(MultiLogWriter, "[DEBUG] project slug=%q\n", projectSlug)
+	debugf("project slug=%q", projectSlug)
 	if projectSlug == "" {
 		return fmt.Errorf("project_slug is empty")
 	}
@@ -1072,14 +1072,14 @@ func UploadWdrvFilesCreatedByJobGid() error {
 		localPath := filepath.Join("/mnt/wdrv", relPath)
 		info, err := os.Stat(localPath)
 		if err != nil {
-			fmt.Fprintf(MultiLogWriter, "[DEBUG] skipping %s: stat error: %v\n", localPath, err)
+			debugf("skipping %s: stat error: %v", localPath, err)
 			continue
 		}
 		if !info.Mode().IsRegular() {
-			fmt.Fprintf(MultiLogWriter, "[DEBUG] skipping %s: not a regular file (mode %v)\n", localPath, info.Mode())
+			debugf("skipping %s: not a regular file (mode %v)", localPath, info.Mode())
 			continue
 		}
-		fmt.Fprintf(MultiLogWriter, "[DEBUG] queueing %s -> %s (%d bytes)\n", localPath, relPath, info.Size())
+		debugf("queueing %s -> %s (%d bytes)", localPath, relPath, info.Size())
 		uploadList = append(uploadList, uploadFileInfo{
 			LocalPath:  localPath,
 			RemotePath: strings.TrimRight(relPath, string(os.PathSeparator)),
@@ -1134,6 +1134,7 @@ func deleteWdrvFiles(files []uploadFileInfo) {
 	for _, fileInfo := range files {
 		if err := os.Remove(fileInfo.LocalPath); err != nil {
 			fmt.Fprintf(MultiLogWriter, "Failed to delete %s: %v\n", fileInfo.LocalPath, err)
+			logOverlayFailureDetails("upload cleanup delete", fileInfo.LocalPath, err)
 		} else {
 			fmt.Fprintf(MultiLogWriter, "Deleted %s\n", fileInfo.LocalPath)
 		}

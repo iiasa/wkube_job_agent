@@ -38,6 +38,7 @@ type overlaySweepResult struct {
 	Deleted  int
 	Bytes    int64
 	SkipLive int
+	Skipped  bool // markers could not be read reliably, nothing was deleted
 }
 
 func loadOverlaySweepConfig() (overlaySweepConfig, bool) {
@@ -103,6 +104,7 @@ func StartOverlayHeartbeat() error {
 			case <-ticker.C:
 				if err := writeHeartbeat(marker); err != nil {
 					fmt.Fprintf(MultiLogWriter, "warning: could not refresh overlay heartbeat %s: %v\n", marker, err)
+					logOverlayFailureDetails("heartbeat refresh", marker, err)
 				}
 			}
 		}
@@ -128,6 +130,7 @@ func StopOverlayHeartbeat() {
 	marker := filepath.Join(wdrvRoot, overlayHeartbeatDirName, jobGid)
 	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
 		fmt.Fprintf(MultiLogWriter, "warning: could not remove overlay heartbeat %s: %v\n", marker, err)
+		logOverlayFailureDetails("heartbeat remove", marker, err)
 	}
 }
 
@@ -165,6 +168,9 @@ func SweepStaleOverlayFiles() {
 
 	fmt.Fprintf(MultiLogWriter, "Overlay sweep started (heartbeat stale after %s, dry run %v)\n", cfg.HeartbeatStale, cfg.DryRun)
 	res := sweepOverlay(wdrvRoot, entries, uint32(ownGid), cfg, time.Now())
+	if res.Skipped {
+		return
+	}
 	verb := "deleted"
 	if cfg.DryRun {
 		verb = "would delete"
@@ -175,7 +181,14 @@ func SweepStaleOverlayFiles() {
 
 func sweepOverlay(root string, entries []overlayEntry, ownGid uint32, cfg overlaySweepConfig, now time.Time) overlaySweepResult {
 	var res overlaySweepResult
-	live := liveHeartbeatGids(root, cfg, now)
+	live, err := liveHeartbeatGids(root, ownGid, cfg, now)
+	if err != nil {
+		// Without a trustworthy list of running jobs every other job would look dead
+		// and lose its files, so delete nothing; the next job's sweep tries again.
+		fmt.Fprintf(MultiLogWriter, "warning: overlay sweep skipped, cannot tell which jobs are running: %v\n", err)
+		res.Skipped = true
+		return res
+	}
 	emptiedDirs := map[string]struct{}{}
 
 	for _, entry := range entries {
@@ -200,6 +213,7 @@ func sweepOverlay(root string, entries []overlayEntry, ownGid uint32, cfg overla
 		} else {
 			if err := os.Remove(path); err != nil {
 				fmt.Fprintf(MultiLogWriter, "[overlay sweep] failed to delete %s: %v\n", path, err)
+				logOverlayFailureDetails("sweep delete", path, err)
 				continue
 			}
 			fmt.Fprintf(MultiLogWriter, "[overlay sweep] deleted %s (gid %d, mtime %s)\n", path, entry.Gid, info.ModTime().Format(time.RFC3339))
@@ -224,8 +238,14 @@ func sweepOverlay(root string, entries []overlayEntry, ownGid uint32, cfg overla
 	return res
 }
 
+// otherJobRunning reports whether any job other than this one has a fresh marker. When
+// the markers cannot be read it answers true, so emptied directories are kept.
 func otherJobRunning(root string, ownGid uint32, cfg overlaySweepConfig) bool {
-	for gid := range liveHeartbeatGids(root, cfg, time.Now()) {
+	live, err := liveHeartbeatGids(root, ownGid, cfg, time.Now())
+	if err != nil {
+		return true
+	}
+	for gid := range live {
 		if gid != ownGid {
 			return true
 		}
@@ -234,12 +254,16 @@ func otherJobRunning(root string, ownGid uint32, cfg overlaySweepConfig) bool {
 }
 
 // liveHeartbeatGids returns gids with a fresh marker and removes markers of dead jobs.
-func liveHeartbeatGids(root string, cfg overlaySweepConfig, now time.Time) map[uint32]bool {
+// It fails rather than guess: if the marker directory or any marker cannot be read, or
+// this job's own marker (created just before the sweep) is not visible as fresh, the
+// listing cannot be trusted and an error is returned.
+func liveHeartbeatGids(root string, ownGid uint32, cfg overlaySweepConfig, now time.Time) (map[uint32]bool, error) {
 	live := map[uint32]bool{}
+	var stale []string
 	dir := filepath.Join(root, overlayHeartbeatDirName)
 	items, err := os.ReadDir(dir)
 	if err != nil {
-		return live
+		return nil, fmt.Errorf("reading %s: %w", dir, err)
 	}
 	for _, item := range items {
 		gid, err := strconv.ParseUint(item.Name(), 10, 32)
@@ -248,17 +272,23 @@ func liveHeartbeatGids(root string, cfg overlaySweepConfig, now time.Time) map[u
 		}
 		info, err := item.Info()
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("reading marker %s: %w", item.Name(), err)
 		}
 		if now.Sub(info.ModTime()) < cfg.HeartbeatStale {
 			live[uint32(gid)] = true
 			continue
 		}
-		if !cfg.DryRun {
-			_ = os.Remove(filepath.Join(dir, item.Name()))
+		stale = append(stale, item.Name())
+	}
+	if !live[ownGid] {
+		return nil, fmt.Errorf("own marker %s/%d is not visible as fresh", dir, ownGid)
+	}
+	if !cfg.DryRun {
+		for _, name := range stale {
+			_ = os.Remove(filepath.Join(dir, name))
 		}
 	}
-	return live
+	return live, nil
 }
 
 // removeEmptyParents removes dir and its parents up to (not including) root while they are empty.
