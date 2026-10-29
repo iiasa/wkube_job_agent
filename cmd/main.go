@@ -371,10 +371,7 @@ func cmdFinalize() {
 			fmt.Fprintf(services.MultiLogWriter, "error uploading job log via xet: %v\n", err)
 		}
 	} else {
-		fmt.Fprintln(services.MultiLogWriter, "warning: project slug not found, attempting standard upload")
-		if err := services.UploadFile(services.JobLogPath, services.LogFileName); err != nil {
-			fmt.Fprintf(services.MultiLogWriter, "error uploading job log: %v\n", err)
-		}
+		fmt.Fprintln(services.MultiLogWriter, "error uploading job log: project slug not found")
 	}
 
 	services.RemoteLogSink.FinalFlush()
