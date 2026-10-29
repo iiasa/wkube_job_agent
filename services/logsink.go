@@ -20,7 +20,11 @@ const (
 	logFlushInterval = 10 * time.Second
 )
 
-var omittedMsgPrefix = "\n[Logs omitted: %d messages dropped due to full channel]\n"
+var omittedMsgFormat = "\n%s\t[Logs omitted: %d messages dropped due to full channel]\n"
+
+// lineTimeFormat is the RFC 3339 UTC millisecond timestamp that prefixes every line sent
+// to the remote sink, followed by a tab. The log viewer merges sources line by line on it.
+const lineTimeFormat = "2006-01-02T15:04:05.000Z07:00"
 
 type RemoteLogger struct {
 	logChan     chan []byte
@@ -28,6 +32,7 @@ type RemoteLogger struct {
 	ctxCancel   context.CancelFunc
 	cancel      context.CancelFunc
 	droppedLogs int
+	atLineStart bool
 	mu          sync.Mutex
 	wg          sync.WaitGroup
 }
@@ -37,8 +42,9 @@ func NewRemoteLogger(ctx context.Context, cancel context.CancelFunc) *RemoteLogg
 	rl := &RemoteLogger{
 		logChan:   make(chan []byte, logChannelSize),
 		ctx:       logCtx,
-		ctxCancel: logCancel,
-		cancel:    cancel,
+		ctxCancel:   logCancel,
+		cancel:      cancel,
+		atLineStart: true,
 	}
 
 	rl.wg.Add(1)
@@ -48,14 +54,38 @@ func NewRemoteLogger(ctx context.Context, cancel context.CancelFunc) *RemoteLogg
 }
 
 func (rl *RemoteLogger) Write(p []byte) (int, error) {
+	// stdout and stderr write concurrently: stamp and enqueue under one lock so lines
+	// keep their order. The send never blocks.
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
 	select {
-	case rl.logChan <- append([]byte(nil), p...):
+	case rl.logChan <- rl.stamp(p):
 	default:
-		rl.mu.Lock()
 		rl.droppedLogs++
-		rl.mu.Unlock()
 	}
 	return len(p), nil
+}
+
+// stamp prefixes each new line with the time it started. Chunks are still cut by bytes,
+// so a line may continue in the next chunk without a prefix. Caller holds rl.mu.
+func (rl *RemoteLogger) stamp(p []byte) []byte {
+	ts := time.Now().UTC().Format(lineTimeFormat) + "\t"
+	out := make([]byte, 0, len(p)+len(ts))
+	for len(p) > 0 {
+		if rl.atLineStart {
+			out = append(out, ts...)
+			rl.atLineStart = false
+		}
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			out = append(out, p...)
+			break
+		}
+		out = append(out, p[:i+1]...)
+		p = p[i+1:]
+		rl.atLineStart = true
+	}
+	return out
 }
 
 func (rl *RemoteLogger) run(cancel context.CancelFunc) {
@@ -99,7 +129,7 @@ DrainLoop:
 	var buf bytes.Buffer
 
 	if dropped > 0 {
-		buf.WriteString(fmt.Sprintf(omittedMsgPrefix, dropped))
+		buf.WriteString(fmt.Sprintf(omittedMsgFormat, time.Now().UTC().Format(lineTimeFormat), dropped))
 	}
 
 	for _, log := range batch {
