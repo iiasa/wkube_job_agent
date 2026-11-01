@@ -19,6 +19,7 @@ var (
 	HTTPClient          *http.Client
 	HTTP2Client         *http.Client
 	RemoteLogSink       *RemoteLogger
+	LogMasker           *SecretMasker
 	MultiLogWriter      io.Writer
 	LogFileName         string
 	RootCtx             context.Context
@@ -133,5 +134,7 @@ func Init(ctx context.Context, cancel context.CancelFunc) {
 	}
 
 	RemoteLogSink = NewRemoteLogger(ctx, cancel)
-	MultiLogWriter = io.MultiWriter(os.Stdout, RemoteLogSink, logFile)
+	// Every log destination sits behind the masker, so job secrets never reach any of them.
+	LogMasker = NewSecretMasker(io.MultiWriter(os.Stdout, RemoteLogSink, logFile), LoadSecretsToMask())
+	MultiLogWriter = LogMasker
 }

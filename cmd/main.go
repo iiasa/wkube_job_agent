@@ -150,6 +150,7 @@ func cmdRun(command string) {
 			fmt.Fprintf(services.MultiLogWriter, "warning: could not touch main_done file: %v\n", err)
 		}
 
+		services.FlushLogMasker()
 		cancel()
 		services.RemoteLogSink.Wait()
 		services.RemoteLogSink.FinalFlush()
@@ -330,6 +331,7 @@ func cmdFinalize() {
 
 	if err := waitForMount(ctx); err != nil {
 		fmt.Fprintf(services.MultiLogWriter, "%v\n", err)
+		services.FlushLogMasker()
 		services.RemoteLogSink.FinalFlush()
 		os.Exit(1)
 	}
@@ -365,6 +367,7 @@ func cmdFinalize() {
 		fmt.Fprintf(services.MultiLogWriter, "error executing post task registry: %v\n", err)
 	}
 
+	services.FlushLogMasker()
 	projectSlug := services.GetProjectSlug()
 	if projectSlug != "" {
 		if err := services.RemotePushLog(services.JobLogPath, services.LogFileName, projectSlug); err != nil {
@@ -374,6 +377,7 @@ func cmdFinalize() {
 		fmt.Fprintln(services.MultiLogWriter, "error uploading job log: project slug not found")
 	}
 
+	services.FlushLogMasker()
 	services.RemoteLogSink.FinalFlush()
 
 	if exitCode == 0 && postProcessErr == nil && wdrvUploadErr == nil {
