@@ -12,6 +12,8 @@ This agent injects into a wkube job, performs data mapping on startup and finali
 
 The agent handles file/directory mappings between mounted storage (`/mnt/tmp` or `/mnt/wdrv`), container local storage, and remote Accelerator repositories (`acc://`).
 
+Before processing mappings the agent reads `/mnt/wdrv/.hf_refresh`, a virtual file that makes hf-mount re-list the bucket, so a job sees what its predecessors uploaded without waiting for the background poll.
+
 ### 1. Syntax
 
 Mappings are defined as a semicolon-separated list of `source:destination` strings in the environment variables:

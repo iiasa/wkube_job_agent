@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -303,10 +304,9 @@ func inputMappingFromMountedStorage(source, destination string) error {
 			
 			// Loop up to 120 seconds in 10s intervals
 			for i := 0; i < 12; i++ {
-				InvalidateFUSECacheForPath(source)
 				time.Sleep(10 * time.Second)
-				InvalidateFUSECacheForPath(source)
-				
+				RefreshWdrv()
+
 				sourceInfo, err = os.Lstat(source)
 				if err == nil {
 					fmt.Fprintf(MultiLogWriter, "success: source file '%s' found after %d seconds\n", source, (i+1)*10)
@@ -657,43 +657,43 @@ func postProcessOutputMappings(outputMappings []string) ([]func() error, error) 
 	return taskQueue, nil
 }
 
-// InvalidateFUSECacheForPath triggers directory invalidation in FUSE by attempting a rename of a nonexistent file.
-// Walk up the path hierarchy to '/mnt/wdrv' and rename inside each directory to clear FUSE's in-memory cache.
-func InvalidateFUSECacheForPath(path string) {
-	if !strings.HasPrefix(path, "/mnt/wdrv") {
+// RefreshWdrv brings the shared /mnt/wdrv mount up to date with the bucket, so this job
+// sees what other jobs uploaded without waiting for hf-mount's background poll (30s).
+// A failure is logged, not returned: the job can still run on the mount's current view.
+func RefreshWdrv() {
+	err := readRefreshFile(wdrvRefreshFile, wdrvRefreshTimeout)
+	if err == nil {
 		return
 	}
-
-	var dir string
-	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
-		dir = path
-	} else {
-		dir = filepath.Dir(path)
+	if errors.Is(err, os.ErrNotExist) {
+		// No /mnt/wdrv on this job, or a mount pod that predates the refresh file.
+		if _, statErr := os.Stat(wdrvRoot); statErr != nil {
+			return
+		}
 	}
+	fmt.Fprintf(MultiLogWriter, "warning: could not refresh /mnt/wdrv: %v\n", err)
+}
 
-	dir = filepath.Clean(dir)
-	if !strings.HasPrefix(dir, "/mnt/wdrv") {
-		return
-	}
-
-	for {
-		// Try to force a directory mtime update by creating and deleting a file.
-		// This reliably invalidates FUSE readdir/attr caches in the kernel.
-		// Adding the OS PID prevents cross-pod / cross-process collisions
-		triggerFile := filepath.Join(dir, fmt.Sprintf(".wagt_refresh_%d_%d", os.Getpid(), time.Now().UnixNano()))
-		if err := os.WriteFile(triggerFile, []byte(""), 0644); err == nil {
-			_ = os.Remove(triggerFile)
+// readRefreshFile reads hf-mount's refresh file, which blocks until the refresh is done.
+// A FUSE read can hang for as long as the mount does, so it runs in its own goroutine.
+func readRefreshFile(path string, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		f, err := os.Open(path)
+		if err != nil {
+			done <- err
+			return
 		}
+		defer f.Close()
+		_, err = io.ReadAll(f)
+		done <- err
+	}()
 
-		if dir == "/mnt/wdrv" || dir == "/" || dir == "." {
-			break
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out after %s", timeout)
 	}
 }
 
@@ -709,35 +709,8 @@ func PreProcessMappings() error {
 	allInputMappings := strings.Split(inputMappings, ";")
 	allOutputMappings := strings.Split(outputMappings, ";")
 
-	// Invalidate FUSE cache for all mapped /mnt/wdrv paths to ensure freshness of directories/files
-	for _, mapping := range allInputMappings {
-		mapping = strings.TrimSpace(mapping)
-		if mapping == "" {
-			continue
-		}
-		parts := strings.Split(mapping, ":")
-		if len(parts) == 2 {
-			source := parts[0]
-			if strings.HasPrefix(source, "/mnt/wdrv") {
-				InvalidateFUSECacheForPath(source)
-			}
-		}
-	}
-	for _, mapping := range allOutputMappings {
-		mapping = strings.TrimSpace(mapping)
-		if mapping == "" {
-			continue
-		}
-		parts := strings.Split(mapping, ":")
-		if len(parts) == 2 {
-			destination := parts[1]
-			if strings.HasPrefix(destination, "/mnt/wdrv") {
-				InvalidateFUSECacheForPath(destination)
-			}
-		}
-	}
-	// Also invalidate the root directory just in case
-	InvalidateFUSECacheForPath("/mnt/wdrv")
+	// Mappings and the job itself must see what preceding jobs uploaded.
+	RefreshWdrv()
 
 	taskQueue, symlinkQueueFromInputMapping, err := processInputMappings(allInputMappings)
 
@@ -941,6 +914,12 @@ func RemotePushLog(source, destination, projectSlug string) error {
 // the overlay backing dir.
 const overlayWritesIndex = "/mnt/wdrv/.hf_overlay_writes"
 
+// wdrvRefreshFile is a virtual file exposed by hf-mount at the mount root. Opening it
+// runs a listing round; a failed round fails the open.
+const wdrvRefreshFile = "/mnt/wdrv/.hf_refresh"
+
+const wdrvRefreshTimeout = 2 * time.Minute
+
 type overlayEntry struct {
 	RelPath string
 	Gid     uint32
@@ -1005,8 +984,8 @@ func parseOverlayLine(line string) (overlayEntry, bool) {
 	return overlayEntry{RelPath: strings.TrimPrefix(line[:prev], "/"), Gid: uint32(gid), Mtime: mtime}, true
 }
 
-// isAgentOverlayFile reports files the agent itself keeps in the overlay
-// (cache-invalidation triggers and heartbeat markers); never upload or sweep them.
+// isAgentOverlayFile reports files the agent itself keeps in the overlay (heartbeat
+// markers, and cache-invalidation triggers left by older agents); never upload or sweep them.
 func isAgentOverlayFile(relPath string) bool {
 	return strings.HasPrefix(filepath.Base(relPath), ".wagt_refresh_") ||
 		strings.HasPrefix(relPath, overlayHeartbeatDirName+"/")

@@ -272,9 +272,9 @@ func cmdRun(command string) {
 		if time.Since(globalStartTime) < 2*time.Minute && ctx.Err() == nil {
 			stderrStr := stderrBuf.String()
 			if strings.Contains(stderrStr, "No such file or directory") && strings.Contains(stderrStr, "/mnt/wdrv") {
-				fmt.Fprintf(services.MultiLogWriter, "\n[Agent] Detected missing /mnt/wdrv file. Forcing cache invalidate and retrying script in 10s (attempt %d/12)...\n\n", attempt)
-				services.InvalidateFUSECacheForPath("/mnt/wdrv")
+				fmt.Fprintf(services.MultiLogWriter, "\n[Agent] Detected missing /mnt/wdrv file. Refreshing the mount and retrying script in 10s (attempt %d/12)...\n\n", attempt)
 				time.Sleep(10 * time.Second)
+				services.RefreshWdrv()
 				continue
 			}
 		}
@@ -342,10 +342,6 @@ func cmdFinalize() {
 			fmt.Fprintf(services.MultiLogWriter, "error writing final log counter: %v\n", err)
 		}
 	}()
-
-	// Invalidate the FUSE cache for /mnt/wdrv upfront to ensure all subsequent
-	// finalize steps (like UploadWdrvFilesCreatedByJobGid) see the latest files.
-	services.InvalidateFUSECacheForPath("/mnt/wdrv")
 
 	postProcessErr := services.PostProcessMappings()
 	if postProcessErr != nil {
